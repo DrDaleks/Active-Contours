@@ -609,7 +609,7 @@ public class ActiveContour extends Detection
 		double maxDisp = contour_resolution.getValue() * 0.25;
 		
 		int index = 0;
-		double dispSum = 0;
+		//double dispSum = 0;
 		
 		for (Point3d p : points)
 		{
@@ -620,7 +620,8 @@ public class ActiveContour extends Detection
 			if (disp > maxDisp)
 				force.scale(maxDisp / disp);
 			
-			dispSum += (disp > maxDisp ? maxDisp : disp);
+			//dispSum += (disp > maxDisp ? maxDisp : disp);
+			// TODO something with dispSum
 			
 			p.add(force);
 			force.set(0, 0, 0);
