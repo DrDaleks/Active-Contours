@@ -9,7 +9,7 @@ import icy.sequence.Sequence;
 import icy.swimmingPool.SwimmingObject;
 import icy.system.thread.ThreadUtil;
 import icy.type.TypeUtil;
-import icy.type.collection.array.ArrayUtil;
+import icy.type.collection.array.Array1DUtil;
 
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
@@ -311,7 +311,7 @@ public class ActiveContours extends EzPlug implements EzStoppable
 					int off = 0;
 					for (int j = 0; j < image.getSizeY(); j++)
 						for (int i = 0; i < image.getSizeX(); i++, off++)
-							if (ArrayUtil.getValue(data, off, false) >= init_isovalue.getValue())
+							if (Array1DUtil.getValue(data, off, false) >= init_isovalue.getValue())
 								roi.addPoint(i, j);
 					
 					try
@@ -379,7 +379,7 @@ public class ActiveContours extends EzPlug implements EzStoppable
 		if (currentContours.size() == 0)
 			return;
 		
-		long cpt = 0;
+		//long cpt = 0;
 		
 		int nbConvergedContours = 0;
 		
@@ -479,7 +479,8 @@ public class ActiveContours extends EzPlug implements EzStoppable
 					input.getValue().painterChanged(painter);
 			}
 			
-			cpt++;
+			//cpt++;
+			// TODO something with cpt (infinite loop check)
 		}
 	}
 	
