@@ -1042,7 +1042,7 @@ public class ActiveContour extends Detection
 	@Override
 	public void paint(Graphics2D g, Sequence sequence, IcyCanvas canvas)
 	{
-		if (getT() != canvas.getT() || !enabled)
+		if (getT() != canvas.getPositionT() || !enabled)
 			return;
 		
 		int fontSize = (int) ROI2D.canvasToImageLogDeltaX(canvas, 20);

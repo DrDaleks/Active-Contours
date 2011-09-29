@@ -33,7 +33,7 @@ public class ActiveContoursPainter extends PainterAdapter
 	{
 		super.paint(g, sequence, canvas);
 		
-		int t = canvas.getT();
+		int t = canvas.getPositionT();
 		
 		if (trackPool == null)
 		{
@@ -53,7 +53,7 @@ public class ActiveContoursPainter extends PainterAdapter
 				{
 					Detection det = detections.get(d);
 					
-					if (det.getT() == canvas.getT())
+					if (det.getT() == canvas.getPositionT())
 					{
 						((ActiveContour) det).paint(g, sequence, canvas);
 						g.drawString("#" + i, (float) det.getX(), (float) det.getY());
