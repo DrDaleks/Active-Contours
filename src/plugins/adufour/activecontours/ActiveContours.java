@@ -297,7 +297,12 @@ public class ActiveContours extends EzPlug implements EzStoppable
 							String message = "Warning: contour could not be triangulated. Possible reasons:\n";
 							message += " - binary mask is below the minimum contour area\n";
 							message += " - the binary mask contains a hole";
-							System.out.println(message);
+							System.err.println(message);
+						}
+						catch(Exception e)
+						{
+							System.err.println("Unable to initialize the contour");
+							e.printStackTrace();
 						}
 					}
 				break;
