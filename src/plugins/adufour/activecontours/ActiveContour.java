@@ -15,9 +15,9 @@ import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Font;
 import java.awt.Graphics2D;
-import java.awt.Polygon;
 import java.awt.Rectangle;
 import java.awt.geom.Line2D;
+import java.awt.geom.Path2D;
 import java.awt.geom.PathIterator;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -83,7 +83,7 @@ public class ActiveContour extends Detection
 	
 	final ArrayList<Point3d>		points			= new ArrayList<Point3d>();
 	
-	Polygon							poly;
+	Path2D.Double					path			= new Path2D.Double();
 	
 	SlidingWindow					convergence;
 	
@@ -112,8 +112,6 @@ public class ActiveContour extends Detection
 		this.contour_minArea = contour_minArea;
 		this.convergence = convergenceWindow;
 		
-		poly = new Polygon();
-		
 		color = new Color((float) Math.random(), (float) Math.random(), (float) Math.random());
 	}
 	
@@ -135,6 +133,9 @@ public class ActiveContour extends Detection
 		
 		for (Point3d p : contour.points)
 			addPoint(p);
+		
+		// in any case, don't forget to close the path
+		path.closePath();
 	}
 	
 	public ActiveContour(ActiveContours owner, EzVarDouble contour_resolution, EzVarInteger contour_minArea, SlidingWindow convergenceWindow, ROI2D roi) throws TopologyException
@@ -180,6 +181,9 @@ public class ActiveContour extends Detection
 				// the final one should be a "close" operation, do nothing
 			}
 		}
+		
+		// in any case, don't forget to close the path
+		path.closePath();
 	}
 	
 	public void setConvergenceWindow(SlidingWindow window)
@@ -400,10 +404,21 @@ public class ActiveContour extends Detection
 		}
 	}
 	
-	void addPoint(Point3d p)
+	private void addPoint(Point3d p)
 	{
 		points.add(p);
-		poly.addPoint((int) p.x, (int) p.y);
+		
+		if (points.size() == 1)
+		{
+			// first point was added => start the path
+			path.moveTo(p.x, p.y);
+		}
+		else
+		{
+			// draw the path using lines (for now)
+			path.lineTo(p.x, p.y);
+			// TODO use quad curves for more elegance
+		}
 	}
 	
 	/**
@@ -488,14 +503,16 @@ public class ActiveContour extends Detection
 			}
 		}
 		
+		// re-sampling is done => update internal structures
+		
 		final int nbPoints = n;
 		if (finalForces == null || finalForces.length != nbPoints)
 		{
 			finalForces = new Vector3d[nbPoints];
 			contourNormals = new Vector3d[nbPoints];
 			feedbackForces = new Vector3d[nbPoints];
-			final int[] xPoints = new int[nbPoints];
-			final int[] yPoints = new int[nbPoints];
+			
+			path.reset();
 			
 			for (int i = 0; i < nbPoints; i++)
 			{
@@ -503,14 +520,18 @@ public class ActiveContour extends Detection
 				contourNormals[i] = new Vector3d();
 				feedbackForces[i] = new Vector3d();
 				Point3d p = points.get(i);
-				xPoints[i] = (int) p.x;
-				yPoints[i] = (int) p.y;
+				
+				if (i == 0)
+				{
+					path.moveTo(p.x, p.y);
+				}
+				else
+				{
+					path.lineTo(p.x, p.y);
+				}
 			}
 			
-			synchronized (poly)
-			{
-				poly = new Polygon(xPoints, yPoints, nbPoints);
-			}
+			path.closePath();
 		}
 		
 		normalsNeedUpdate = true;
@@ -606,10 +627,10 @@ public class ActiveContour extends Detection
 	void move()
 	{
 		Vector3d force;
-		double maxDisp = contour_resolution.getValue() * 0.25;
+		double maxDisp = contour_resolution.getValue() * 0.05;
 		
 		int index = 0;
-		//double dispSum = 0;
+		// double dispSum = 0;
 		
 		for (Point3d p : points)
 		{
@@ -620,14 +641,11 @@ public class ActiveContour extends Detection
 			if (disp > maxDisp)
 				force.scale(maxDisp / disp);
 			
-			//dispSum += (disp > maxDisp ? maxDisp : disp);
+			// dispSum += (disp > maxDisp ? maxDisp : disp);
 			// TODO something with dispSum
 			
 			p.add(force);
 			force.set(0, 0, 0);
-			
-			poly.xpoints[index] = (int) Math.ceil(p.x);
-			poly.ypoints[index] = (int) Math.ceil(p.y);
 			
 			finalForces[index].set(0, 0, 0);
 			feedbackForces[index].set(0, 0, 0);
@@ -674,17 +692,6 @@ public class ActiveContour extends Detection
 		}
 		
 		normalsNeedUpdate = false;
-	}
-	
-	/**
-	 * Gets the contour as a java.awt.Polygon object. The returned polygon is a copy of the polygon
-	 * used in this object
-	 * 
-	 * @return
-	 */
-	public Polygon getPolygon()
-	{
-		return new Polygon(poly.xpoints, poly.ypoints, poly.npoints);
 	}
 	
 	public BoundingSphere getBoundingSphere()
@@ -768,8 +775,6 @@ public class ActiveContour extends Detection
 		double val, inDiff, outDiff, sum;
 		int n = points.size();
 		
-		// IcyBufferedImage image = sequence.getFirstImage();
-		
 		for (int i = 0; i < n; i++)
 		{
 			try
@@ -777,8 +782,6 @@ public class ActiveContour extends Detection
 				p = points.get(i);
 				f = finalForces[i];
 				norm = contourNormals[i];
-				// val = (image.getDataAsByte((int) p.x, (int) p.y, 0) & 0xff) / 255.0;
-				// val = region_data.getDataAsDouble((int) p.x, (int) p.y, 0);
 				val = getPixelValue(region_data, p.x, p.y);
 				inDiff = val - cin;
 				outDiff = val - cout;
@@ -914,7 +917,6 @@ public class ActiveContour extends Detection
 				
 				if ((penetration = target.isInside(p, targetCenter)) > 0)
 				{
-					// feedbackForce.scale(penetration * -0.5, contourNormals[index]);
 					feedbackForce.scale(penetration * -2.0, contourNormals[index]);
 				}
 			}
@@ -994,12 +996,12 @@ public class ActiveContour extends Detection
 		
 		switch (order)
 		{
-			
+		
 			case 0: // number of points
 			{
 				return points.size();
 			}
-				
+			
 			case 1: // perimeter
 			{
 				Point3d p1;
@@ -1056,7 +1058,7 @@ public class ActiveContour extends Detection
 		g.setStroke(new BasicStroke((float) stroke));
 		
 		g.setColor(color);
-		g.draw(poly);
+		
+		g.draw(path);
 	}
-	
 }
