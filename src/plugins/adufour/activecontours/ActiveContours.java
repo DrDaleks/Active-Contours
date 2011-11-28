@@ -8,15 +8,18 @@ import icy.roi.ROI2DArea;
 import icy.sequence.Sequence;
 import icy.swimmingPool.SwimmingObject;
 import icy.system.thread.ThreadUtil;
-import icy.type.TypeUtil;
+import icy.type.DataType;
 import icy.type.collection.array.Array1DUtil;
 
 import java.awt.Graphics2D;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 
+import javax.swing.Timer;
 import javax.vecmath.Point3d;
 
 import plugins.adufour.activecontours.SlidingWindow.Operation;
@@ -37,7 +40,6 @@ import plugins.adufour.filtering.Convolution1D;
 import plugins.adufour.filtering.Kernels1D;
 import plugins.fab.trackmanager.Detection;
 import plugins.fab.trackmanager.TrackGroup;
-import plugins.fab.trackmanager.TrackManager;
 import plugins.fab.trackmanager.TrackPool;
 import plugins.fab.trackmanager.TrackSegment;
 
@@ -192,15 +194,16 @@ public class ActiveContours extends EzPlug implements EzStoppable
 		trackGroup = new TrackGroup(input.getValue());
 		trackPool.getTrackGroupList().add(trackGroup);
 		
-		ThreadUtil.invokeLater(new Runnable()
+		if (tracking.getValue())
 		{
-			public void run()
+			ThreadUtil.invokeLater(new Runnable()
 			{
-				Icy.getMainInterface().getSwimmingPool().add(new SwimmingObject(trackGroup));
-				TrackManager tm = new TrackManager();
-				tm.setDisplaySequence(input.getValue());
-			}
-		});
+				public void run()
+				{
+					Icy.getMainInterface().getSwimmingPool().add(new SwimmingObject(trackGroup));
+				}
+			});
+		}
 		
 		if (getUI() != null)
 		{
@@ -221,6 +224,16 @@ public class ActiveContours extends EzPlug implements EzStoppable
 		result.removeAllImage();
 		result.setName("Active Contours result");
 		
+		Timer repaintTimer = new Timer(100, new ActionListener()
+		{
+			@Override
+			public void actionPerformed(ActionEvent arg0)
+			{
+				if (input.getValue() != null)
+					input.getValue().painterChanged(painter);
+			}
+		});
+		
 		for (int t = startT; t <= endT; t++)
 		{
 			if (globalStop)
@@ -228,14 +241,17 @@ public class ActiveContours extends EzPlug implements EzStoppable
 			if (getUI() != null && input.getValue().getFirstViewer() != null)
 				input.getValue().getFirstViewer().setT(t);
 			initContours(t, t == startT);
+			repaintTimer.start();
 			evolveContours(t);
+			repaintTimer.stop();
 			storeResult(t);
 		}
+		
 		if (getUI() != null)
 		{
 			addSequence(result);
 			SwimmingObject object = new SwimmingObject(trackGroup);
-			trackPool.addResult(object);
+			trackPool.addResult(object);			
 		}
 	}
 	
@@ -251,7 +267,7 @@ public class ActiveContours extends EzPlug implements EzStoppable
 				inputImage = inputImage.extractChannel(region_c.getValue());
 			
 			Sequence gradient = Kernels1D.GRADIENT.toSequence();
-			Sequence gradX = new Sequence(inputImage.convertToType(TypeUtil.TYPE_DOUBLE, inputImage.isSignedDataType(), true));
+			Sequence gradX = new Sequence(inputImage.convertToType(DataType.DOUBLE, true));
 			Sequence gradY = gradX.getCopy();
 			Convolution1D.convolve(gradX, gradient, null, null);
 			Convolution1D.convolve(gradY, null, gradient, null);
@@ -267,9 +283,9 @@ public class ActiveContours extends EzPlug implements EzStoppable
 			if (inputImage.getSizeC() > 1)
 				inputImage = inputImage.extractChannel(region_c.getValue());
 			
-			region_data = inputImage.convertToType(TypeUtil.TYPE_DOUBLE, false, true);
-			region_local_mask = new IcyBufferedImage(region_data.getWidth(), region_data.getHeight(), 1, TypeUtil.TYPE_BYTE);
-			region_globl_mask = new IcyBufferedImage(region_data.getWidth(), region_data.getHeight(), 1, TypeUtil.TYPE_BYTE);
+			region_data = inputImage.convertToType(DataType.DOUBLE, true);
+			region_local_mask = new IcyBufferedImage(region_data.getWidth(), region_data.getHeight(), 1, DataType.UBYTE);
+			region_globl_mask = new IcyBufferedImage(region_data.getWidth(), region_data.getHeight(), 1, DataType.UBYTE);
 			region_cin.clear();
 		}
 		
@@ -299,7 +315,7 @@ public class ActiveContours extends EzPlug implements EzStoppable
 							message += " - the binary mask contains a hole";
 							System.err.println(message);
 						}
-						catch(Exception e)
+						catch (Exception e)
 						{
 							System.err.println("Unable to initialize the contour");
 							e.printStackTrace();
@@ -308,7 +324,7 @@ public class ActiveContours extends EzPlug implements EzStoppable
 				break;
 				
 				case ISOVALUE:
-
+					
 					ROI2DArea roi = new ROI2DArea();
 					IcyBufferedImage image = input.getValue().getFirstImage();
 					Object data = image.getDataXY(0);
@@ -336,7 +352,7 @@ public class ActiveContours extends EzPlug implements EzStoppable
 						message += " - the binary mask contains a hole";
 						System.out.println(message);
 					}
-					
+				
 				break;
 				
 				default:
@@ -384,7 +400,7 @@ public class ActiveContours extends EzPlug implements EzStoppable
 		if (currentContours.size() == 0)
 			return;
 		
-		//long cpt = 0;
+		// long cpt = 0;
 		
 		int nbConvergedContours = 0;
 		
@@ -480,11 +496,11 @@ public class ActiveContours extends EzPlug implements EzStoppable
 						region_updateMeans(t);
 				}
 				
-				if (input.getValue() != null)
-					input.getValue().painterChanged(painter);
+				// if (input.getValue() != null)
+				// input.getValue().painterChanged(painter);
 			}
 			
-			//cpt++;
+			// cpt++;
 			// TODO something with cpt (infinite loop check)
 		}
 	}
@@ -520,7 +536,7 @@ public class ActiveContours extends EzPlug implements EzStoppable
 			
 			// draw in the sequence
 			g.setColor(contour.getColor());
-			g.fill(contour.poly);
+			g.fill(contour.path);
 		}
 		g.dispose();
 		
@@ -554,7 +570,7 @@ public class ActiveContours extends EzPlug implements EzStoppable
 			
 			// create a mask for each object for interior mean measuring
 			Arrays.fill(_localMask, (byte) 0);
-			g_local_mask.fill(contour.poly);
+			g_local_mask.fill(contour.path);
 			
 			for (int i = 0; i < _localMask.length; i++)
 			{
@@ -568,7 +584,7 @@ public class ActiveContours extends EzPlug implements EzStoppable
 			region_cin.put(contour, inSum / inCpt);
 			
 			// add the contour to the global mask for background mean measuring
-			g_globl_mask.fill(contour.poly);
+			g_globl_mask.fill(contour.path);
 		}
 		
 		double outSum = 0, outCpt = 0;
