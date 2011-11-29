@@ -59,7 +59,7 @@ public class ActiveContours extends EzPlug implements EzStoppable
 	public final EzVarDouble				regul_weight			= new EzVarDouble("weight", 0.1, 0, 10.0, 0.1);
 	
 	public final EzGroup					edge					= new EzGroup("Gradient-based evolution");
-	public final EzVarBoolean				edge_flag				= new EzVarBoolean("Use gradient", true);
+	public final EzVarBoolean				edge_flag				= new EzVarBoolean("Use gradient", false);
 	public final EzVarSequence				edge_input				= new EzVarSequence("source data");
 	public final EzVarInteger				edge_c					= new EzVarInteger("Input channel", 0, 0, 1);
 	public final EzVarInteger				edge_z					= new EzVarInteger("Input Z slice", 0, 0, 1);
@@ -224,13 +224,20 @@ public class ActiveContours extends EzPlug implements EzStoppable
 		result.removeAllImage();
 		result.setName("Active Contours result");
 		
-		Timer repaintTimer = new Timer(100, new ActionListener()
+		final Timer repaintTimer = new Timer(100, null);
+		repaintTimer.addActionListener(new ActionListener()
 		{
 			@Override
 			public void actionPerformed(ActionEvent arg0)
 			{
-				if (input.getValue() != null)
+				if (input.getValue(false) != null)
+				{
 					input.getValue().painterChanged(painter);
+				}
+				else
+				{
+					repaintTimer.stop();
+				}
 			}
 		});
 		
@@ -251,7 +258,7 @@ public class ActiveContours extends EzPlug implements EzStoppable
 		{
 			addSequence(result);
 			SwimmingObject object = new SwimmingObject(trackGroup);
-			trackPool.addResult(object);			
+			trackPool.addResult(object);
 		}
 	}
 	
