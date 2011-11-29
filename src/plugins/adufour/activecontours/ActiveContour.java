@@ -627,7 +627,7 @@ public class ActiveContour extends Detection
 	void move()
 	{
 		Vector3d force;
-		double maxDisp = contour_resolution.getValue() * 0.05;
+		double maxDisp = contour_resolution.getValue() * 0.1;
 		
 		int index = 0;
 		// double dispSum = 0;
