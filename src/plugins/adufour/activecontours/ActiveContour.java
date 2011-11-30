@@ -103,6 +103,8 @@ public class ActiveContour extends Detection
 	
 	private final EzVarInteger		contour_minArea;
 	
+	private boolean					counterClockWise;
+	
 	private ActiveContour(ActiveContours owner, EzVarDouble contour_resolution, EzVarInteger contour_minArea, SlidingWindow convergenceWindow)
 	{
 		super(0, 0, 0, 0);
@@ -136,6 +138,8 @@ public class ActiveContour extends Detection
 		
 		// in any case, don't forget to close the path
 		path.closePath();
+		
+		counterClockWise = (getAlgebraicArea() > 0);
 	}
 	
 	public ActiveContour(ActiveContours owner, EzVarDouble contour_resolution, EzVarInteger contour_minArea, SlidingWindow convergenceWindow, ROI2D roi) throws TopologyException
@@ -149,7 +153,7 @@ public class ActiveContour extends Detection
 		
 		if (!(roi instanceof ROI2DEllipse) && !(roi instanceof ROI2DRectangle) && !(roi instanceof ROI2DPolygon) && !(roi instanceof ROI2DArea))
 		{
-			EzMessage.message("Wrong ROI type. Only Rectangle, Ellipse and Polygon are currently supported", MessageType.ERROR, OutputType.DIALOG);
+			EzMessage.message("Wrong ROI type. Only Rectangle, Ellipse, Polygon and Area are supported", MessageType.ERROR, OutputType.DIALOG);
 		}
 		
 		if (roi instanceof ROI2DArea)
@@ -184,6 +188,8 @@ public class ActiveContour extends Detection
 		
 		// in any case, don't forget to close the path
 		path.closePath();
+		
+		counterClockWise = (getAlgebraicArea() > 0);
 	}
 	
 	public void setConvergenceWindow(SlidingWindow window)
@@ -787,11 +793,17 @@ public class ActiveContour extends Detection
 				outDiff = val - cout;
 				
 				sum = weight * contour_resolution.getValue() * (sensitivity * (outDiff * outDiff) - (inDiff * inDiff) / sensitivity);
-				// sum = weight * contourRes * ((outDiff * outDiff) - (inDiff * inDiff)) /
-				// ratio;
-				// System.out.println(sum);
-				f.x += sum * norm.x;
-				f.y += sum * norm.y;
+
+				if (counterClockWise)
+				{
+					f.x -= sum * norm.x;
+					f.y -= sum * norm.y;
+				}
+				else
+				{
+					f.x += sum * norm.x;
+					f.y += sum * norm.y;
+				}
 			}
 			catch (Exception e)
 			{
@@ -989,6 +1001,34 @@ public class ActiveContour extends Detection
 		
 	}
 	
+	/**
+	 * Computes the algebraic area of the current contour. The returned value is negative if the
+	 * contour points are order clockwise and positive if ordered counter-clockwise. The contour's
+	 * surface is just the absolute value of this algebraic surface
+	 * 
+	 * @return
+	 */
+	private double getAlgebraicArea()
+	{
+		int nm1 = points.size() - 1;
+		double area = 0;
+		
+		// all points but the last
+		for (int i = 0; i < nm1; i++)
+		{
+			Point3d p1 = points.get(i);
+			Point3d p2 = points.get(i + 1);
+			area += (p2.x * p1.y - p1.x * p2.y) * 0.5;
+		}
+		
+		// last point
+		Point3d p1 = points.get(nm1);
+		Point3d p2 = points.get(0);
+		area += (p2.x * p1.y - p1.x * p2.y) * 0.5;
+		
+		return area;
+	}
+	
 	public double getDimension(int order)
 	{
 		if (points.size() <= 1)
@@ -1018,23 +1058,7 @@ public class ActiveContour extends Detection
 			}
 			case 2: // area
 			{
-				int nm1 = points.size() - 1;
-				double area = 0;
-				
-				// all points but the last
-				for (int i = 0; i < nm1; i++)
-				{
-					Point3d p1 = points.get(i);
-					Point3d p2 = points.get(i + 1);
-					area += (p2.x * p1.y - p1.x * p2.y) * 0.5;
-				}
-				
-				// last point
-				Point3d p1 = points.get(nm1);
-				Point3d p2 = points.get(0);
-				area += (p2.x * p1.y - p1.x * p2.y) * 0.5;
-				
-				return Math.abs(area);
+				return Math.abs(getAlgebraicArea());
 			}
 			default:
 				throw new UnsupportedOperationException("Dimension " + order + " not implemented");
