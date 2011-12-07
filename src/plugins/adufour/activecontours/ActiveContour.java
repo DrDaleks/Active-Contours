@@ -31,7 +31,7 @@ import plugins.adufour.ezplug.EzMessage.MessageType;
 import plugins.adufour.ezplug.EzMessage.OutputType;
 import plugins.adufour.ezplug.EzVarDouble;
 import plugins.adufour.ezplug.EzVarInteger;
-import plugins.fab.trackmanager.Detection;
+import plugins.nchenouard.spot.Detection;
 
 public class ActiveContour extends Detection
 {
@@ -114,7 +114,7 @@ public class ActiveContour extends Detection
 		this.contour_minArea = contour_minArea;
 		this.convergence = convergenceWindow;
 		
-		color = new Color((float) Math.random(), (float) Math.random(), (float) Math.random());
+		setColor(new Color((float) Math.random(), (float) Math.random(), (float) Math.random()));
 	}
 	
 	/**
@@ -130,7 +130,7 @@ public class ActiveContour extends Detection
 		setX(contour.x);
 		setY(contour.y);
 		
-		color = contour.color;
+		setColor(contour.getColor());
 		points.ensureCapacity(contour.points.size());
 		
 		for (Point3d p : contour.points)
@@ -1081,7 +1081,7 @@ public class ActiveContour extends Detection
 		
 		g.setStroke(new BasicStroke((float) stroke));
 		
-		g.setColor(color);
+		g.setColor(getColor());
 		
 		g.draw(path);
 	}

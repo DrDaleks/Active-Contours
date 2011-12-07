@@ -8,9 +8,9 @@ import java.awt.Graphics2D;
 import java.util.ArrayList;
 import java.util.HashMap;
 
-import plugins.fab.trackmanager.Detection;
 import plugins.fab.trackmanager.TrackGroup;
 import plugins.fab.trackmanager.TrackSegment;
+import plugins.nchenouard.spot.Detection;
 
 public class ActiveContoursPainter extends PainterAdapter
 {
