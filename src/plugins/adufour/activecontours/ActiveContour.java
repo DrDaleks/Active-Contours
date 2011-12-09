@@ -158,7 +158,7 @@ public class ActiveContour extends Detection
 		
 		if (roi instanceof ROI2DArea)
 		{
-			owner.input.getValue().addPainter(this);
+			// owner.input.getValue().addPainter(this);
 			triangulate((ROI2DArea) roi, contour_resolution.getValue());
 		}
 		else
@@ -736,12 +736,68 @@ public class ActiveContour extends Detection
 	}
 	
 	/**
+	 * Update the axis constraint force, which adjusts the takes the final forces and normalize them
+	 * to keep the contour shape along its principal axis <br>
+	 * WARNING: this method directly update the array of final forces used to displace the contour
+	 * points. It should be used among the last to keep it most effective
+	 * 
+	 * @param weight
+	 */
+	void updateAxisForces(double weight)
+	{
+		Vector3d axis = new Vector3d();
+		int s = (int) getDimension(0);
+		
+		// Compute the object axis as the vector between the two most distant
+		// contour points
+		// TODO this is not optimal, geometric moments should be used
+		{
+			double maxDistSq = 0;
+			Vector3d vec = new Vector3d();
+			
+			for (int i = 0; i < s; i++)
+			{
+				Point3d vi = points.get(i);
+				
+				for (int j = i + 1; j < s; j++)
+				{
+					Point3d vj = points.get(j);
+					
+					vec.sub(vi, vj);
+					double dSq = vec.lengthSquared();
+					
+					if (dSq > maxDistSq)
+					{
+						maxDistSq = dSq;
+						axis.set(vec);
+					}
+				}
+			}
+			axis.normalize();
+		}
+		
+		// To drive the contour along the main object axis, each displacement
+		// vector is scaled by the scalar product between its normal and the main axis.
+		{
+			updateNormalsIfNeeded();
+			
+			for (int i = 0; i < s; i++)
+			{
+				Vector3d normal = contourNormals[i];
+				
+				if (normal != null)
+					finalForces[i].scale(Math.min(1.0, Math.abs(normal.dot(axis)) / weight));
+			}
+		}
+	}
+	
+	/**
 	 * Update edge term of the contour evolution according to the image gradient
 	 * 
 	 * @param weight
 	 * @param edge_data
 	 */
-	public void updateEdgeForces(IcyBufferedImage edgeDataX, IcyBufferedImage edgeDataY, double weight)
+	void updateEdgeForces(IcyBufferedImage edgeDataX, IcyBufferedImage edgeDataY, double weight)
 	{
 		int n = points.size();
 		
@@ -793,7 +849,7 @@ public class ActiveContour extends Detection
 				outDiff = val - cout;
 				
 				sum = weight * contour_resolution.getValue() * (sensitivity * (outDiff * outDiff) - (inDiff * inDiff) / sensitivity);
-
+				
 				if (counterClockWise)
 				{
 					f.x -= sum * norm.x;
