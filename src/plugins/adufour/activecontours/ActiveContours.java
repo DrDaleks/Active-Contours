@@ -9,7 +9,6 @@ import icy.sequence.Sequence;
 import icy.swimmingPool.SwimmingObject;
 import icy.system.thread.ThreadUtil;
 import icy.type.DataType;
-import icy.type.collection.array.Array1DUtil;
 
 import java.awt.Graphics2D;
 import java.awt.event.ActionEvent;
@@ -21,8 +20,11 @@ import java.util.HashMap;
 
 import javax.swing.Timer;
 import javax.vecmath.Point3d;
+import javax.vecmath.Point3i;
 
 import plugins.adufour.activecontours.SlidingWindow.Operation;
+import plugins.adufour.connectedcomponents.ConnectedComponent;
+import plugins.adufour.connectedcomponents.ConnectedComponents;
 import plugins.adufour.ezplug.EzGroup;
 import plugins.adufour.ezplug.EzMessage;
 import plugins.adufour.ezplug.EzMessage.MessageType;
@@ -38,6 +40,7 @@ import plugins.adufour.ezplug.EzVarListener;
 import plugins.adufour.ezplug.EzVarSequence;
 import plugins.adufour.filtering.Convolution1D;
 import plugins.adufour.filtering.Kernels1D;
+import plugins.adufour.thresholder.Thresholder;
 import plugins.fab.trackmanager.TrackGroup;
 import plugins.fab.trackmanager.TrackPool;
 import plugins.fab.trackmanager.TrackSegment;
@@ -73,6 +76,10 @@ public class ActiveContours extends EzPlug implements EzStoppable
 	public final EzVarDouble				region_weight			= new EzVarDouble("weight", 1, 0, 10.0, 0.1);
 	public final EzVarDouble				region_sensitivity		= new EzVarDouble("sensitivity", 1.0, 0.1, 10.0, 0.1);
 	public final EzVarBoolean				coupling_flag			= new EzVarBoolean("Multi-contour coupling", true);
+	
+	public final EzGroup					axis					= new EzGroup("Long-axis constraint");
+	public final EzVarBoolean				axis_flag				= new EzVarBoolean("Use constraint", false);
+	public final EzVarDouble				axis_weight				= new EzVarDouble("weight", 1, 0, 100, 1);
 	
 	public final EzGroup					contour					= new EzGroup("Contour parameters");
 	public final EzVarDouble				contour_resolution		= new EzVarDouble("Contour Resolution", 1.0, 0.1, 1000.0, 0.1);
@@ -167,6 +174,11 @@ public class ActiveContours extends EzPlug implements EzStoppable
 				}
 			}
 		});
+		
+		// axis contraint
+		addEzComponent(axis_flag);
+		axis.addEzComponent(axis_weight);
+		addEzComponent(axis);
 		
 		// coupling
 		addEzComponent(coupling_flag);
@@ -300,65 +312,69 @@ public class ActiveContours extends EzPlug implements EzStoppable
 		
 		if (isFirstImage)
 		{
+			Sequence inSeq = input.getValue();
+			
+			// // remove existing ActiveContourPainters and track segments if any
+			// for (Painter p : inSeq.getPainters())
+			// if (p instanceof ActiveContoursPainter)
+			// inSeq.removePainter(p);
+			
+			trackGroup.getTrackSegmentList().clear();
+			
 			switch (init_type.getValue())
 			{
 				case ROI:
-					for (ROI2D roi : input.getValue().getROI2Ds())
+					for (ROI2D roi : inSeq.getROI2Ds())
 					{
-						try
+						if (roi instanceof ROI2DArea)
 						{
-							final ActiveContour contour = new ActiveContour(this, contour_resolution, contour_minArea, new SlidingWindow(convergence_winSize.getValue()), roi);
-							contour.setX(roi.getBounds2D().getCenterX());
-							contour.setY(roi.getBounds2D().getCenterY());
-							contour.setT(t);
-							TrackSegment segment = new TrackSegment();
-							segment.addDetection(contour);
-							trackGroup.getTrackSegmentList().add(segment);
+							// special case: check if the area has multiple components => split them
+							ROI2DArea area = (ROI2DArea) roi;
+							IcyBufferedImage binImg = new IcyBufferedImage(inSeq.getWidth(), inSeq.getHeight(), 1, DataType.UBYTE);
+							byte[] array = binImg.getDataXYAsByte(0);
+							boolean[] mask = area.getAsBooleanMask(0, 0, input.getValue().getWidth(), input.getValue().getHeight());
+							int off = 0;
+							for (int j = 0; j < inSeq.getSizeY(); j++)
+								for (int i = 0; i < inSeq.getSizeX(); i++, off++)
+									if (mask[off])
+										array[off] = (byte) 1;
+							initFromBinaryImage(binImg, t);
 						}
-						catch (TopologyException topo)
+						else
 						{
-							String message = "Warning: contour could not be triangulated. Possible reasons:\n";
-							message += " - binary mask is below the minimum contour area\n";
-							message += " - the binary mask contains a hole";
-							System.err.println(message);
-						}
-						catch (Exception e)
-						{
-							System.err.println("Unable to initialize the contour");
-							e.printStackTrace();
+							try
+							{
+								final ActiveContour contour = new ActiveContour(this, contour_resolution, contour_minArea, new SlidingWindow(convergence_winSize.getValue()), roi);
+								contour.setX(roi.getBounds2D().getCenterX());
+								contour.setY(roi.getBounds2D().getCenterY());
+								contour.setT(t);
+								TrackSegment segment = new TrackSegment();
+								segment.addDetection(contour);
+								trackGroup.getTrackSegmentList().add(segment);
+							}
+							catch (TopologyException topo)
+							{
+								String message = "Warning: contour could not be triangulated. Possible reasons:\n";
+								message += " - binary mask is below the minimum contour area\n";
+								message += " - the binary mask contains a hole";
+								System.err.println(message);
+							}
+							catch (Exception e)
+							{
+								System.err.println("Unable to initialize the contour");
+								e.printStackTrace();
+							}
 						}
 					}
 				break;
 				
 				case ISOVALUE:
 					
-					ROI2DArea roi = new ROI2DArea();
-					IcyBufferedImage image = input.getValue().getFirstImage();
-					Object data = image.getDataXY(0);
+					IcyBufferedImage binImg = input.getValue().getImage(t, region_z.getValue()).getCopy();
 					
-					int off = 0;
-					for (int j = 0; j < image.getSizeY(); j++)
-						for (int i = 0; i < image.getSizeX(); i++, off++)
-							if (Array1DUtil.getValue(data, off, false) >= init_isovalue.getValue())
-								roi.addPoint(i, j);
+					Thresholder.threshold(new Sequence(binImg), 0, new double[] { init_isovalue.getValue() }, true);
 					
-					try
-					{
-						final ActiveContour contour = new ActiveContour(this, contour_resolution, contour_minArea, new SlidingWindow(convergence_winSize.getValue()), roi);
-						contour.setX(roi.getBounds2D().getCenterX());
-						contour.setY(roi.getBounds2D().getCenterY());
-						contour.setT(t);
-						TrackSegment segment = new TrackSegment();
-						segment.addDetection(contour);
-						trackGroup.getTrackSegmentList().add(segment);
-					}
-					catch (TopologyException e1)
-					{
-						String message = "Warning: contour could not be triangulated. Possible reasons:\n";
-						message += " - binary mask is below the minimum contour area\n";
-						message += " - the binary mask contains a hole";
-						System.out.println(message);
-					}
+					initFromBinaryImage(binImg, t);
 				
 				break;
 				
@@ -393,6 +409,36 @@ public class ActiveContours extends EzPlug implements EzStoppable
 		}
 	}
 	
+	private void initFromBinaryImage(IcyBufferedImage binImg, int t)
+	{
+		for (ConnectedComponent cc : ConnectedComponents.extractConnectedComponents(new Sequence(binImg), null).get(0))
+		{
+			ROI2DArea roi = new ROI2DArea();
+			
+			for (Point3i pt : cc)
+				roi.addPoint(pt.x, pt.y);
+			
+			try
+			{
+				final ActiveContour contour = new ActiveContour(this, contour_resolution, contour_minArea, new SlidingWindow(convergence_winSize.getValue()), roi);
+				contour.setX(roi.getBounds2D().getCenterX());
+				contour.setY(roi.getBounds2D().getCenterY());
+				contour.setT(t);
+				TrackSegment segment = new TrackSegment();
+				segment.addDetection(contour);
+				trackGroup.getTrackSegmentList().add(segment);
+			}
+			catch (TopologyException e1)
+			{
+				String message = "Warning: contour could not be triangulated. Possible reasons:\n";
+				message += " - binary mask is below the minimum contour area\n";
+				message += " - the binary mask contains a hole";
+				System.out.println(message);
+			}
+			
+		}
+	}
+	
 	private void evolveContours(int t)
 	{
 		ArrayList<ActiveContour> currentContours = new ArrayList<ActiveContour>(trackGroup.getTrackSegmentList().size());
@@ -419,6 +465,8 @@ public class ActiveContours extends EzPlug implements EzStoppable
 			
 			if (region_flag.getValue())
 				region_updateMeans(t);
+			
+			// TODO launch the loop below in multi-thread
 			
 			for (int ct = 0; ct < currentContours.size(); ct++)
 			{
@@ -447,11 +495,12 @@ public class ActiveContours extends EzPlug implements EzStoppable
 					if (region_flag.getValue())
 						currentContour.updateRegionForces(region_data, region_weight.getValue(), region_cin.get(currentContour), region_cout, region_sensitivity.getValue());
 					
+					if (axis_flag.getValue())
+						currentContour.updateAxisForces(axis_weight.getValue());
+					
 					if (coupling_flag.getValue())
 						for (ActiveContour otherContour : currentContours)
 							currentContour.updateFeedbackForces(otherContour);
-					
-					currentContour.move();
 				}
 				catch (TopologyException e)
 				{
@@ -502,10 +551,10 @@ public class ActiveContours extends EzPlug implements EzStoppable
 					if (region_flag.getValue())
 						region_updateMeans(t);
 				}
-				
-				// if (input.getValue() != null)
-				// input.getValue().painterChanged(painter);
 			}
+			
+			for (ActiveContour c : currentContours)
+				c.move();
 			
 			// cpt++;
 			// TODO something with cpt (infinite loop check)

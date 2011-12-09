@@ -7,5 +7,7 @@
 	<classpathentry kind="var" path="ICY_HOME/plugins/adufour/filtering/FilterToolbox.jar"/>
 	<classpathentry kind="var" path="ICY_HOME/plugins/nchenouard/spot/DetectionResult.jar"/>
 	<classpathentry kind="var" path="ICY_HOME/plugins/fab/trackmanager/TrackManager.jar"/>
+	<classpathentry kind="var" path="ICY_HOME/plugins/adufour/connectedcomponents/ConnectedComponents.jar"/>
+	<classpathentry kind="var" path="ICY_HOME/plugins/adufour/thresholder/Thresholder.jar"/>
 	<classpathentry kind="output" path="bin"/>
 </classpath>
