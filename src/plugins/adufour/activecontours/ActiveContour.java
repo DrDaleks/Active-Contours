@@ -10,6 +10,7 @@ import icy.roi.ROI2DPolygon;
 import icy.roi.ROI2DRectangle;
 import icy.roi.ROI2DShape;
 import icy.sequence.Sequence;
+import icy.type.DataType;
 
 import java.awt.BasicStroke;
 import java.awt.Color;
@@ -630,28 +631,27 @@ public class ActiveContour extends Detection
 		}
 	}
 	
-	void move()
+	void move(Rectangle field, boolean boundToField, double timeStep)
 	{
 		Vector3d force;
-		double maxDisp = contour_resolution.getValue() * 0.1;
+		double maxDisp = contour_resolution.getValue() * timeStep;
 		
 		int index = 0;
-		// double dispSum = 0;
 		
 		for (Point3d p : points)
 		{
-			force = finalForces[index];
-			force.add(feedbackForces[index]);
-			
-			double disp = force.length();
-			if (disp > maxDisp)
-				force.scale(maxDisp / disp);
-			
-			// dispSum += (disp > maxDisp ? maxDisp : disp);
-			// TODO something with dispSum
-			
-			p.add(force);
-			force.set(0, 0, 0);
+			if (boundToField && field.contains(p.x, p.y))
+			{
+				force = finalForces[index];
+				force.add(feedbackForces[index]);
+				
+				double disp = force.length();
+				if (disp > maxDisp)
+					force.scale(maxDisp / disp);
+				
+				p.add(force);
+				force.set(0, 0, 0);
+			}
 			
 			finalForces[index].set(0, 0, 0);
 			feedbackForces[index].set(0, 0, 0);
@@ -785,8 +785,14 @@ public class ActiveContour extends Detection
 			{
 				Vector3d normal = contourNormals[i];
 				
+				// dot product between normalized vectors ranges from -1 to 1
+				double colinearity = Math.abs(normal.dot(axis)); // now from 0 to 1
+				
+				// goal: adjust the minimum using the weight, but keep max to 1
+				double threshold = Math.max(colinearity, 1 - weight);
+				
 				if (normal != null)
-					finalForces[i].scale(Math.min(1.0, Math.abs(normal.dot(axis)) / weight));
+					finalForces[i].scale(threshold);
 			}
 		}
 	}
@@ -869,8 +875,10 @@ public class ActiveContour extends Detection
 	}
 	
 	/**
-	 * Caluculates the 2D image value at the given real coordinates by bilinear interpolation
+	 * Calculates the 2D image value at the given real coordinates by bilinear interpolation
 	 * 
+	 * @param image
+	 *            the image to sample (must be of type {@link DataType#DOUBLE})
 	 * @param x
 	 *            the X-coordinate of the point
 	 * @param y
@@ -880,14 +888,16 @@ public class ActiveContour extends Detection
 	private double getPixelValue(IcyBufferedImage image, double x, double y)
 	{
 		final int width = image.getWidth();
+		final int height = image.getHeight();
 		
-		if (x < 0 || x > width || y < 0 || y > image.getHeight())
+		final int i = (int) Math.round(x);
+		final int j = (int) Math.round(y);
+		
+		if (i < 0 || i >= width - 1 || j < 0 || j >= height - 1)
 			return 0;
 		
 		double value = 0;
 		
-		final int i = (int) Math.round(x);
-		final int j = (int) Math.round(y);
 		final int offset = i + j * width;
 		final int offset_plus_1 = offset + 1; // saves 1 addition
 		double[] data = image.getDataXYAsDouble(0);
@@ -898,17 +908,10 @@ public class ActiveContour extends Detection
 		final double mx = 1 - x;
 		final double my = 1 - y;
 		
-		try
-		{
-			value += mx * my * data[offset];
-			value += x * my * data[offset_plus_1];
-			value += mx * y * data[offset + width];
-			value += x * y * data[offset_plus_1 + width];
-		}
-		catch (final java.lang.ArrayIndexOutOfBoundsException aioobE)
-		{
-			value = 0;
-		}
+		value += mx * my * data[offset];
+		value += x * my * data[offset_plus_1];
+		value += mx * y * data[offset + width];
+		value += x * y * data[offset_plus_1 + width];
 		
 		return value;
 	}

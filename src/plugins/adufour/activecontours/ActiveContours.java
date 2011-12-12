@@ -11,6 +11,7 @@ import icy.system.thread.ThreadUtil;
 import icy.type.DataType;
 
 import java.awt.Graphics2D;
+import java.awt.Rectangle;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.image.BufferedImage;
@@ -59,36 +60,35 @@ public class ActiveContours extends EzPlug implements EzStoppable
 	
 	public final EzGroup					regul					= new EzGroup("Regularization");
 	public final EzVarBoolean				regul_flag				= new EzVarBoolean("Regularization", true);
-	public final EzVarDouble				regul_weight			= new EzVarDouble("weight", 0.1, 0, 10.0, 0.1);
+	public final EzVarDouble				regul_weight			= new EzVarDouble("weight", 0.1, 0, 1.0, 0.01);
 	
 	public final EzGroup					edge					= new EzGroup("Gradient-based evolution");
 	public final EzVarBoolean				edge_flag				= new EzVarBoolean("Use gradient", false);
 	public final EzVarSequence				edge_input				= new EzVarSequence("source data");
 	public final EzVarInteger				edge_c					= new EzVarInteger("Input channel", 0, 0, 1);
 	public final EzVarInteger				edge_z					= new EzVarInteger("Input Z slice", 0, 0, 1);
-	public final EzVarDouble				edge_weight				= new EzVarDouble("weight", 0.5, -10.0, 10.0, 0.1);
+	public final EzVarDouble				edge_weight				= new EzVarDouble("weight", 0, -1, 1, 0.1);
 	
 	public final EzGroup					region					= new EzGroup("Region-based evolution");
 	public final EzVarBoolean				region_flag				= new EzVarBoolean("Use region", true);
 	public final EzVarSequence				region_input			= new EzVarSequence("source data");
 	public final EzVarInteger				region_c				= new EzVarInteger("Input channel", 0, 0, 1);
 	public final EzVarInteger				region_z				= new EzVarInteger("Input Z slice", 0, 0, 1);
-	public final EzVarDouble				region_weight			= new EzVarDouble("weight", 1, 0, 10.0, 0.1);
-	public final EzVarDouble				region_sensitivity		= new EzVarDouble("sensitivity", 1.0, 0.1, 10.0, 0.1);
+	public final EzVarDouble				region_weight			= new EzVarDouble("weight", 1.0, 0.0, 1.0, 0.1);
+	public final EzVarDouble				region_sensitivity		= new EzVarDouble("sensitivity", 1.0, 0.1, 20.0, 0.1);
 	public final EzVarBoolean				coupling_flag			= new EzVarBoolean("Multi-contour coupling", true);
 	
 	public final EzGroup					axis					= new EzGroup("Long-axis constraint");
-	public final EzVarBoolean				axis_flag				= new EzVarBoolean("Use constraint", false);
-	public final EzVarDouble				axis_weight				= new EzVarDouble("weight", 1, 0, 100, 1);
+	public final EzVarBoolean				axis_flag				= new EzVarBoolean("Use axis constraint", false);
+	public final EzVarDouble				axis_weight				= new EzVarDouble("weight", 0.5, 0.0, 1, 0.1);
 	
-	public final EzGroup					contour					= new EzGroup("Contour parameters");
-	public final EzVarDouble				contour_resolution		= new EzVarDouble("Contour Resolution", 1.0, 0.1, 1000.0, 0.1);
+	public final EzGroup					evolution					= new EzGroup("Evolution parameters");
+	public final EzVarDouble				contour_resolution		= new EzVarDouble("Contour resolution", 1.0, 0.1, 1000.0, 0.1);
 	public final EzVarInteger				contour_minArea			= new EzVarInteger("Contour min. area", 10, 1, 100000000, 1);
-	
-	public final EzGroup					convergence				= new EzGroup("Convergence detection");
-	public final EzVarInteger				convergence_winSize		= new EzVarInteger("Window size", 50, 10, 10000, 10);
-	public final EzVarEnum<Operation>		convergence_operation	= new EzVarEnum<SlidingWindow.Operation>("Window operation", Operation.values(), Operation.VAR_COEFF);
-	public final EzVarDouble				convergence_criterion	= new EzVarDouble("Stability criterion", 0.001, 0, 0.1, 0.001);
+	public final EzVarDouble				contour_timeStep		= new EzVarDouble("Evolution time step", 0.1, 0.1, 1, 0.01);	
+	public final EzVarInteger				convergence_winSize		= new EzVarInteger("Convergence window size", 50, 10, 10000, 10);
+	public final EzVarEnum<Operation>		convergence_operation	= new EzVarEnum<SlidingWindow.Operation>("Convergence operation", Operation.values(), Operation.VAR_COEFF);
+	public final EzVarDouble				convergence_criterion	= new EzVarDouble("Convergence criterion", 0.001, 0, 0.1, 0.001);
 	
 	public final EzVarBoolean				tracking				= new EzVarBoolean("Tracking", false);
 	public final EzVarBoolean				updateMeans				= new EzVarBoolean("Update means", false);
@@ -118,13 +118,17 @@ public class ActiveContours extends EzPlug implements EzStoppable
 		init_type.addVisibilityTriggerTo(init_isovalue, Initialization.ISOVALUE);
 		
 		// regul
+		regul_flag.setToolTipText("Sets the contour(s) to remain smooth during its evolution");
 		addEzComponent(regul_flag);
 		regul.addEzComponent(regul_weight);
+		regul_weight.setToolTipText("Higher values result in a smoother contour, but may also slow its growth");
 		addEzComponent(regul);
 		regul_flag.addVisibilityTriggerTo(regul, true);
 		
 		// edge
+		edge_flag.setToolTipText("Sets the contour(s) to follow image intensity gradients");
 		addEzComponent(edge_flag);
+		edge_weight.setToolTipText("Negative (resp. positive) weight pushes contours toward decreasing (resp. increasing) intensities");
 		edge.addEzComponent(edge_input, edge_c, edge_z, edge_weight);
 		addEzComponent(edge);
 		edge_flag.addVisibilityTriggerTo(edge, true);
@@ -150,7 +154,9 @@ public class ActiveContours extends EzPlug implements EzStoppable
 		});
 		
 		// region
+		region_flag.setToolTipText("Sets the contour(s) to isolate homogeneous intensity regions");
 		addEzComponent(region_flag);
+		region_sensitivity.setToolTipText("Higher values improve the sensitivity to dim objects");
 		region.addEzComponent(region_input, region_c, region_z, region_weight, region_sensitivity);
 		addEzComponent(region);
 		region_flag.addVisibilityTriggerTo(region, true);
@@ -176,21 +182,28 @@ public class ActiveContours extends EzPlug implements EzStoppable
 		});
 		
 		// axis contraint
+		axis_flag.setToolTipText("Sets the contour(s) to deform mostly along its principal axis");
 		addEzComponent(axis_flag);
+		axis_weight.setToolTipText("Higher values restrict the evolution along the principal axis");
 		axis.addEzComponent(axis_weight);
+		axis_flag.addVisibilityTriggerTo(axis, true);
 		addEzComponent(axis);
 		
 		// coupling
+		coupling_flag.setToolTipText("Prevents multiple contours from overlapping");
 		addEzComponent(coupling_flag);
 		
 		// contour
-		contour.addEzComponent(contour_resolution, contour_minArea);
-		addEzComponent(contour);
+		contour_resolution.setToolTipText("Sets the contour(s) precision as the distance (in pixels) between control points");
+		contour_minArea.setToolTipText("Contours with a surface (in pixels) below this value will be removed");
+		contour_timeStep.setToolTipText("Defines the evolution speed (warning: keep a low value to avoid vibration effects)");
+		convergence_winSize.setToolTipText("Defines over how many iterations the algorithm should check for convergence");
+		convergence_operation.setToolTipText("Defines the operation used to detect convergence");
+		convergence_criterion.setToolTipText("Defines the value of the criterion used to detect convergence");
+		evolution.addEzComponent(contour_resolution, contour_minArea, contour_timeStep, convergence_winSize, convergence_operation, convergence_criterion);
+		addEzComponent(evolution);
 		
-		// convergence
-		convergence.addEzComponent(convergence_winSize, convergence_operation, convergence_criterion);
-		addEzComponent(convergence);
-		
+		tracking.setToolTipText("Track objects over time and export results to the track manager");
 		addEzComponent(tracking);
 	}
 	
@@ -286,8 +299,17 @@ public class ActiveContours extends EzPlug implements EzStoppable
 				inputImage = inputImage.extractChannel(region_c.getValue());
 			
 			Sequence gradient = Kernels1D.GRADIENT.toSequence();
+			Sequence gaussian = Kernels1D.CUSTOM_GAUSSIAN.createGaussianKernel1D(1.0).toSequence();
+			
 			Sequence gradX = new Sequence(inputImage.convertToType(DataType.DOUBLE, true));
+			
+			// smooth the signal first
+			Convolution1D.convolve(gradX, gaussian, gaussian, null);
+			
+			// clone into gradY
 			Sequence gradY = gradX.getCopy();
+			
+			// compute the gradient in each direction
 			Convolution1D.convolve(gradX, gradient, null, null);
 			Convolution1D.convolve(gradY, null, gradient, null);
 			
@@ -453,6 +475,8 @@ public class ActiveContours extends EzPlug implements EzStoppable
 		if (currentContours.size() == 0)
 			return;
 		
+		Rectangle field = new Rectangle(input.getValue().getWidth(), input.getValue().getHeight());
+		
 		// long cpt = 0;
 		
 		int nbConvergedContours = 0;
@@ -554,7 +578,7 @@ public class ActiveContours extends EzPlug implements EzStoppable
 			}
 			
 			for (ActiveContour c : currentContours)
-				c.move();
+				c.move(field, true, contour_timeStep.getValue());
 			
 			// cpt++;
 			// TODO something with cpt (infinite loop check)
