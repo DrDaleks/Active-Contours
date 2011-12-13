@@ -10,11 +10,11 @@ import icy.swimmingPool.SwimmingObject;
 import icy.system.thread.ThreadUtil;
 import icy.type.DataType;
 
+import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
-import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -82,13 +82,17 @@ public class ActiveContours extends EzPlug implements EzStoppable
 	public final EzVarBoolean				axis_flag				= new EzVarBoolean("Use axis constraint", false);
 	public final EzVarDouble				axis_weight				= new EzVarDouble("weight", 0.5, 0.0, 1, 0.1);
 	
-	public final EzGroup					evolution					= new EzGroup("Evolution parameters");
+	public final EzGroup					evolution				= new EzGroup("Evolution parameters");
 	public final EzVarDouble				contour_resolution		= new EzVarDouble("Contour resolution", 1.0, 0.1, 1000.0, 0.1);
 	public final EzVarInteger				contour_minArea			= new EzVarInteger("Contour min. area", 10, 1, 100000000, 1);
-	public final EzVarDouble				contour_timeStep		= new EzVarDouble("Evolution time step", 0.1, 0.1, 1, 0.01);	
+	public final EzVarDouble				contour_timeStep		= new EzVarDouble("Evolution time step", 0.1, 0.1, 1, 0.01);
 	public final EzVarInteger				convergence_winSize		= new EzVarInteger("Convergence window size", 50, 10, 10000, 10);
 	public final EzVarEnum<Operation>		convergence_operation	= new EzVarEnum<SlidingWindow.Operation>("Convergence operation", Operation.values(), Operation.VAR_COEFF);
 	public final EzVarDouble				convergence_criterion	= new EzVarDouble("Convergence criterion", 0.001, 0, 0.1, 0.001);
+	
+	public final EzGroup					output					= new EzGroup("Output");
+	public final EzVarBoolean				output_rois				= new EzVarBoolean("Regions Of Interests", true);
+	public final EzVarBoolean				output_labels			= new EzVarBoolean("Labeled sequence", false);
 	
 	public final EzVarBoolean				tracking				= new EzVarBoolean("Tracking", false);
 	public final EzVarBoolean				updateMeans				= new EzVarBoolean("Update means", false);
@@ -103,8 +107,6 @@ public class ActiveContours extends EzPlug implements EzStoppable
 	
 	private final TrackPool					trackPool				= new TrackPool();
 	private TrackGroup						trackGroup;
-	
-	public final Sequence					result					= new Sequence();
 	
 	private ActiveContoursPainter			painter;
 	
@@ -203,6 +205,12 @@ public class ActiveContours extends EzPlug implements EzStoppable
 		evolution.addEzComponent(contour_resolution, contour_minArea, contour_timeStep, convergence_winSize, convergence_operation, convergence_criterion);
 		addEzComponent(evolution);
 		
+		// output
+		output_rois.setToolTipText("Clone the original sequence and with results overlayed as ROIs");
+		output_labels.setToolTipText("Creates a labeled sequence with all rasterized contours");
+		output.addEzComponent(output_rois, output_labels);
+		addEzComponent(output);
+		
 		tracking.setToolTipText("Track objects over time and export results to the track manager");
 		addEzComponent(tracking);
 	}
@@ -246,9 +254,6 @@ public class ActiveContours extends EzPlug implements EzStoppable
 			}
 		}
 		
-		result.removeAllImage();
-		result.setName("Active Contours result");
-		
 		final Timer repaintTimer = new Timer(100, null);
 		repaintTimer.addActionListener(new ActionListener()
 		{
@@ -266,6 +271,9 @@ public class ActiveContours extends EzPlug implements EzStoppable
 			}
 		});
 		
+		Sequence outputSequence_rois = output_rois.getValue() ? input.getValue().getCopy() : null;
+		Sequence outputSequence_labels = output_labels.getValue() ? new Sequence() : null;
+		
 		for (int t = startT; t <= endT; t++)
 		{
 			if (globalStop)
@@ -276,12 +284,23 @@ public class ActiveContours extends EzPlug implements EzStoppable
 			repaintTimer.start();
 			evolveContours(t);
 			repaintTimer.stop();
-			storeResult(t);
+			
+			// store detections and results
+			storeResult(outputSequence_rois, outputSequence_labels, t);
 		}
 		
 		if (getUI() != null)
 		{
-			addSequence(result);
+			if (output_rois.getValue())
+			{
+				outputSequence_rois.setName(input.getValue().getName() + " + active contours");
+				addSequence(outputSequence_rois);
+			}
+			if (output_labels.getValue())
+			{
+				outputSequence_labels.setName("labels found in " + input.getValue().getName());
+				addSequence(outputSequence_labels);
+			}
 			SwimmingObject object = new SwimmingObject(trackGroup);
 			trackPool.addResult(object);
 		}
@@ -376,7 +395,7 @@ public class ActiveContours extends EzPlug implements EzStoppable
 							}
 							catch (TopologyException topo)
 							{
-								String message = "Warning: contour could not be triangulated. Possible reasons:\n";
+								String message = "Warning: a contour could not be triangulated. Possible reasons:\n";
 								message += " - binary mask is below the minimum contour area\n";
 								message += " - the binary mask contains a hole";
 								System.err.println(message);
@@ -585,43 +604,53 @@ public class ActiveContours extends EzPlug implements EzStoppable
 		}
 	}
 	
-	private void storeResult(int t)
+	private void storeResult(Sequence rois, Sequence labels, int t)
 	{
-		BufferedImage resultImage = new BufferedImage(input.getValue().getWidth(), input.getValue().getHeight(), BufferedImage.TYPE_INT_ARGB);
+		ArrayList<TrackSegment> segments = trackGroup.getTrackSegmentList();
 		
-		Graphics2D g = (Graphics2D) resultImage.getGraphics();
-		g.clearRect(0, 0, input.getValue().getWidth(), input.getValue().getHeight());
-		
-		// ArrayList<ActiveContour> currentContours = contoursMap.get(t);
-		ArrayList<ActiveContour> currentContours = new ArrayList<ActiveContour>(trackGroup.getTrackSegmentList().size());
-		for (TrackSegment segment : trackGroup.getTrackSegmentList())
+		IcyBufferedImage labelsIMG = null;
+		if (output_labels.getValue())
 		{
-			Detection det = segment.getDetectionAtTime(t);
-			if (det != null)
-				currentContours.add((ActiveContour) det);
+			labelsIMG = new IcyBufferedImage(input.getValue().getWidth(), input.getValue().getHeight(), 1, DataType.UBYTE);
+			labels.setImage(t, 0, labelsIMG);
 		}
 		
-		for (ActiveContour contour : currentContours)
+		for (int i = 1; i <= segments.size(); i++)
 		{
-			// store the detection result
-			// contours.add(contour);
-			
-			// set the detection parameters
-			Point3d center = new Point3d();
-			for (Point3d p : contour.points)
-				center.add(p);
-			center.scale(1.0 / contour.points.size());
-			contour.setX(center.x);
-			contour.setY(center.y);
-			
-			// draw in the sequence
-			g.setColor(contour.getColor());
-			g.fill(contour.path);
+			TrackSegment segment = segments.get(i - 1);
+			ArrayList<Detection> detections = segment.getDetectionList();
+			for (Detection det : detections)
+			{
+				ActiveContour contour = (ActiveContour) det;
+				
+				// store detection parameters
+				Point3d center = new Point3d();
+				for (Point3d p : contour.points)
+					center.add(p);
+				center.scale(1.0 / contour.points.size());
+				contour.setX(center.x);
+				contour.setY(center.y);
+				
+				// output as ROIs
+				if (output_rois.getValue())
+				{
+					ROI2DArea area = new ROI2DArea();
+					area.addShape(contour.path);
+					area.setColor(contour.getColor());
+					area.setT(t);
+					area.setName("Object #" + i);
+					rois.addROI(area, false);
+				}
+				
+				// output as labels
+				if (output_labels.getValue())
+				{
+					Graphics2D g = labelsIMG.createGraphics();
+					g.setColor(new Color(i));
+					g.fill(contour.path);
+				}
+			}
 		}
-		g.dispose();
-		
-		result.setImage(t, 0, resultImage);
-		result.updateComponentsBounds(true, true);
 	}
 	
 	private void region_updateMeans(int t)
