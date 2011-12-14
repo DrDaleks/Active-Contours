@@ -673,12 +673,23 @@ public class ActiveContours extends EzPlug implements EzStoppable
 						
 						TrackSegment motherSegment = null;
 						
-						for (TrackSegment segment : trackGroup.getTrackSegmentList())
+						ArrayList<TrackSegment> segments = trackGroup.getTrackSegmentList();
+						for (int i = 0; i < segments.size(); i++)
 						{
+							TrackSegment segment = segments.get(i);
+							
 							if (segment.containsDetection(contour))
 							{
-								motherSegment = segment;
 								segment.removeDetection(contour);
+								
+								if (segment.getDetectionList().size() == 0)
+								{
+									segments.remove(i--);
+								}
+								else
+								{
+									motherSegment = segment;
+								}
 								break;
 							}
 						}
@@ -701,11 +712,20 @@ public class ActiveContours extends EzPlug implements EzStoppable
 						
 						currentContours.remove(contour);
 						
-						for (TrackSegment segment : trackGroup.getTrackSegmentList())
+						ArrayList<TrackSegment> segments = trackGroup.getTrackSegmentList();
+						for (int i = 0; i < segments.size(); i++)
 						{
+							TrackSegment segment = segments.get(i);
+							
 							if (segment.containsDetection(contour))
 							{
 								segment.removeDetection(contour);
+								
+								if (segment.getDetectionList().size() == 0)
+								{
+									segments.remove(i--);
+								}
+								
 								break;
 							}
 						}
@@ -799,7 +819,9 @@ public class ActiveContours extends EzPlug implements EzStoppable
 		for (int i = 1; i <= segments.size(); i++)
 		{
 			TrackSegment segment = segments.get(i - 1);
+			
 			ActiveContour contour = (ActiveContour) segment.getDetectionAtTime(t);
+			if (contour == null) continue;
 			
 			// store detection parameters
 			Point3d center = new Point3d();
