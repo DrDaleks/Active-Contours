@@ -17,7 +17,13 @@ import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import javax.swing.Timer;
 import javax.vecmath.Point3d;
@@ -109,6 +115,9 @@ public class ActiveContours extends EzPlug implements EzStoppable
 	private TrackGroup						trackGroup;
 	
 	private ActiveContoursPainter			painter;
+	
+	private ExecutorService					mainService				= Executors.newCachedThreadPool();
+	private ExecutorService					meanUpdaterService		= Executors.newCachedThreadPool();
 	
 	@Override
 	public void initialize()
@@ -242,8 +251,7 @@ public class ActiveContours extends EzPlug implements EzStoppable
 		{
 			// replace any ActiveContours Painter object on the sequence by ours
 			for (Painter painter : input.getValue().getPainters())
-				if (painter instanceof ActiveContoursPainter)
-					input.getValue().removePainter(painter);
+				if (painter instanceof ActiveContoursPainter) input.getValue().removePainter(painter);
 			
 			painter = new ActiveContoursPainter(trackGroup);
 			input.getValue().addPainter(painter);
@@ -276,10 +284,8 @@ public class ActiveContours extends EzPlug implements EzStoppable
 		
 		for (int t = startT; t <= endT; t++)
 		{
-			if (globalStop)
-				break;
-			if (getUI() != null && input.getValue().getFirstViewer() != null)
-				input.getValue().getFirstViewer().setT(t);
+			if (globalStop) break;
+			if (getUI() != null && input.getValue().getFirstViewer() != null) input.getValue().getFirstViewer().setT(t);
 			initContours(t, t == startT);
 			repaintTimer.start();
 			evolveContours(t);
@@ -314,8 +320,7 @@ public class ActiveContours extends EzPlug implements EzStoppable
 		{
 			IcyBufferedImage inputImage = edge_input.getValue().getImage(t, region_z.getValue());
 			
-			if (inputImage.getSizeC() > 1)
-				inputImage = inputImage.extractChannel(region_c.getValue());
+			if (inputImage.getSizeC() > 1) inputImage = inputImage.extractChannel(region_c.getValue());
 			
 			Sequence gradient = Kernels1D.GRADIENT.toSequence();
 			Sequence gaussian = Kernels1D.CUSTOM_GAUSSIAN.createGaussianKernel1D(1.0).toSequence();
@@ -340,8 +345,7 @@ public class ActiveContours extends EzPlug implements EzStoppable
 		{
 			IcyBufferedImage inputImage = region_input.getValue().getImage(t, region_z.getValue());
 			
-			if (inputImage.getSizeC() > 1)
-				inputImage = inputImage.extractChannel(region_c.getValue());
+			if (inputImage.getSizeC() > 1) inputImage = inputImage.extractChannel(region_c.getValue());
 			
 			region_data = inputImage.convertToType(DataType.DOUBLE, true);
 			region_local_mask = new IcyBufferedImage(region_data.getWidth(), region_data.getHeight(), 1, DataType.UBYTE);
@@ -377,8 +381,7 @@ public class ActiveContours extends EzPlug implements EzStoppable
 							int off = 0;
 							for (int j = 0; j < inSeq.getSizeY(); j++)
 								for (int i = 0; i < inSeq.getSizeX(); i++, off++)
-									if (mask[off])
-										array[off] = (byte) 1;
+									if (mask[off]) array[off] = (byte) 1;
 							initFromBinaryImage(binImg, t);
 						}
 						else
@@ -440,8 +443,7 @@ public class ActiveContours extends EzPlug implements EzStoppable
 			{
 				Detection previous = segment.getDetectionAtTime(t - 1);
 				
-				if (previous == null)
-					continue;
+				if (previous == null) continue;
 				
 				ActiveContour clone = new ActiveContour((ActiveContour) previous);
 				clone.setT(t);
@@ -480,128 +482,307 @@ public class ActiveContours extends EzPlug implements EzStoppable
 		}
 	}
 	
-	private void evolveContours(int t)
+	private void evolveContours(final int t)
 	{
-		ArrayList<ActiveContour> currentContours = new ArrayList<ActiveContour>(trackGroup.getTrackSegmentList().size());
+		final HashSet<ActiveContour> currentContours = new HashSet<ActiveContour>(trackGroup.getTrackSegmentList().size());
 		
 		for (TrackSegment segment : trackGroup.getTrackSegmentList())
 		{
 			Detection det = segment.getDetectionAtTime(t);
-			if (det != null)
-				currentContours.add((ActiveContour) det);
+			if (det != null) currentContours.add((ActiveContour) det);
 		}
 		
-		if (currentContours.size() == 0)
-			return;
+		if (currentContours.size() == 0) return;
 		
 		Rectangle field = new Rectangle(input.getValue().getWidth(), input.getValue().getHeight());
 		
-		// long cpt = 0;
-		
 		int nbConvergedContours = 0;
+		
+		long iter = 0;
+		
+		if (region_flag.getValue()) updateRegionMeans(meanUpdaterService, currentContours, t);
 		
 		while (!globalStop && nbConvergedContours < currentContours.size())
 		{
+			iter++;
 			nbConvergedContours = 0;
 			
-			// update image data if necessary
+			// update region information every 10 iterations
+			if (region_flag.getValue() && iter % 10 == 0) updateRegionMeans(meanUpdaterService, currentContours, t);
 			
-			if (region_flag.getValue())
-				region_updateMeans(t);
+			// take a snapshot of the current list of non-converged contours
+			final HashSet<ActiveContour> contours = new HashSet<ActiveContour>(currentContours.size());
 			
-			// TODO launch the loop below in multi-thread
-			
-			for (int ct = 0; ct < currentContours.size(); ct++)
+			for (ActiveContour contour : currentContours)
 			{
-				ActiveContour currentContour = currentContours.get(ct);
-				
-				Double criterion = currentContour.convergence.computeCriterion(convergence_operation.getValue());
+				Double criterion = contour.convergence.computeCriterion(convergence_operation.getValue());
 				
 				if (criterion != null && criterion < convergence_criterion.getValue())
 				{
 					nbConvergedContours++;
-					if (getUI() != null)
-						getUI().setProgressBarValue((double) nbConvergedContours / currentContours.size());
+					if (getUI() != null) getUI().setProgressBarValue((double) nbConvergedContours / currentContours.size());
 					continue;
 				}
 				
-				try
-				{
-					currentContour.reSample(0.7, 1.4);
-					
-					if (edge_flag.getValue())
-						currentContour.updateEdgeForces(edgeDataX, edgeDataY, edge_weight.getValue());
-					
-					if (regul_flag.getValue())
-						currentContour.updateInternalForces(regul_weight.getValue());
-					
-					if (region_flag.getValue())
-						currentContour.updateRegionForces(region_data, region_weight.getValue(), region_cin.get(currentContour), region_cout, region_sensitivity.getValue());
-					
-					if (axis_flag.getValue())
-						currentContour.updateAxisForces(axis_weight.getValue());
-					
-					if (coupling_flag.getValue())
-						for (ActiveContour otherContour : currentContours)
-							currentContour.updateFeedbackForces(otherContour);
-				}
-				catch (TopologyException e)
-				{
-					ActiveContour removedContour = currentContours.remove(ct--);
-					
-					TrackSegment motherSegment = null;
-					
-					for (TrackSegment segment : trackGroup.getTrackSegmentList())
-					{
-						if (segment.containsDetection(removedContour))
-						{
-							motherSegment = segment;
-							segment.removeDetection(removedContour);
-							break;
-						}
-					}
-					
-					for (ActiveContour child : e.children)
-					{
-						currentContours.add(child);
-						TrackSegment childSegment = new TrackSegment();
-						childSegment.addDetection(child);
-						trackGroup.addTrackSegment(childSegment);
-						
-						if (motherSegment != null && motherSegment.getDetectionList().size() > 0)
-							trackPool.createLink(motherSegment, childSegment);
-					}
-					
-					if (region_flag.getValue())
-						region_updateMeans(t);
-				}
-				catch (NullPointerException npe)
-				{
-					npe.printStackTrace();
-					System.out.println(currentContour.points.size());
-					
-					ActiveContour removedContour = currentContours.remove(ct--);
-					
-					for (TrackSegment segment : trackGroup.getTrackSegmentList())
-					{
-						if (segment.containsDetection(removedContour))
-						{
-							segment.removeDetection(removedContour);
-							break;
-						}
-					}
-					
-					if (region_flag.getValue())
-						region_updateMeans(t);
-				}
+				// if the contour hasn't converged yet, store it for the main loop
+				contours.add(contour);
 			}
 			
-			for (ActiveContour c : currentContours)
-				c.move(field, true, contour_timeStep.getValue());
+			// re-sample the contours to ensure homogeneous resolution
+			resampleContours(mainService, meanUpdaterService, contours, currentContours, t);
 			
-			// cpt++;
-			// TODO something with cpt (infinite loop check)
+			// if coupling is required, contours should all be deformed synchronously
+			if (coupling_flag.getValue())
+			{
+				// compute deformations issued from the energy minimization
+				computeDeformations(mainService, contours, currentContours);
+				
+				// once they are all computed, apply all deformations at once
+				applyDeformations(contours, field);
+			}
+			else
+			{
+				// contours can be evolved independently from one another
+				deformContoursAsync(mainService, contours, field);
+			}
 		}
+	}
+	
+	private void deformContoursAsync(ExecutorService service, HashSet<ActiveContour> contours, final Rectangle field)
+	{
+		ArrayList<Future<ActiveContour>> tasks = new ArrayList<Future<ActiveContour>>(contours.size());
+		
+		for (final ActiveContour contour : contours)
+		{
+			tasks.add(service.submit(new Runnable()
+			{
+				public void run()
+				{
+					if (edge_flag.getValue()) contour.updateEdgeForces(edgeDataX, edgeDataY, edge_weight.getValue());
+					
+					if (regul_flag.getValue()) contour.updateInternalForces(regul_weight.getValue());
+					
+					if (region_flag.getValue()) contour.updateRegionForces(region_data, region_weight.getValue(), region_cin.get(contour), region_cout, region_sensitivity.getValue());
+					
+					if (axis_flag.getValue()) contour.updateAxisForces(axis_weight.getValue());
+					
+					contour.move(field, true, contour_timeStep.getValue());
+				}
+			}, contour));
+		}
+		
+		for (Future<?> future : tasks)
+			try
+			{
+				future.get();
+			}
+			catch (InterruptedException e1)
+			{
+				e1.printStackTrace();
+			}
+			catch (ExecutionException e1)
+			{
+				e1.printStackTrace();
+			}
+		
+	}
+	
+	private void updateRegionMeans(ExecutorService service, Collection<ActiveContour> contours, int t)
+	{
+		ArrayList<Future<?>> tasks = new ArrayList<Future<?>>(contours.size());
+		
+		final double[] _region_data = region_data.getDataXYAsDouble(0);
+		
+		byte[] _globlMask = region_globl_mask.getDataXYAsByte(0);
+		Arrays.fill(_globlMask, (byte) 0);
+		final Graphics2D g_globl_mask = region_globl_mask.createGraphics();
+		
+		final byte[] _localMask = region_local_mask.getDataXYAsByte(0);
+		final Graphics2D g_local_mask = region_local_mask.createGraphics();
+		
+		for (final ActiveContour contour : contours)
+		{
+			tasks.add(service.submit(new Runnable()
+			{
+				public void run()
+				{
+					double inSum = 0, inCpt = 0;
+					
+					// create a mask for each object for interior mean measuring
+					Arrays.fill(_localMask, (byte) 0);
+					g_local_mask.fill(contour.path);
+					
+					for (int i = 0; i < _localMask.length; i++)
+					{
+						if (_localMask[i] != 0)
+						{
+							inSum += _region_data[i];
+							inCpt++;
+						}
+					}
+					
+					region_cin.put(contour, inSum / inCpt);
+					
+					// add the contour to the global mask for background mean measuring
+					g_globl_mask.fill(contour.path);
+				}
+			}));
+			
+			for (Future<?> future : tasks)
+				try
+				{
+					future.get();
+				}
+				catch (InterruptedException e)
+				{
+				}
+				catch (ExecutionException e)
+				{
+				}
+		}
+		
+		double outSum = 0, outCpt = 0;
+		for (int i = 0; i < _globlMask.length; i++)
+		{
+			if (_globlMask[i] == 0)
+			{
+				outSum += _region_data[i];
+				outCpt++;
+			}
+		}
+		region_cout = outSum / outCpt;
+	}
+	
+	private void resampleContours(ExecutorService service, final ExecutorService meanUpdaterService, final HashSet<ActiveContour> contours, final HashSet<ActiveContour> currentContours, final int t)
+	{
+		ArrayList<Future<ActiveContour>> tasks = new ArrayList<Future<ActiveContour>>(contours.size());
+		
+		for (final ActiveContour contour : contours)
+		{
+			tasks.add(service.submit(new Runnable()
+			{
+				public void run()
+				{
+					try
+					{
+						contour.reSample(0.7, 1.4);
+					}
+					catch (TopologyException e)
+					{
+						currentContours.remove(contour);
+						
+						TrackSegment motherSegment = null;
+						
+						for (TrackSegment segment : trackGroup.getTrackSegmentList())
+						{
+							if (segment.containsDetection(contour))
+							{
+								motherSegment = segment;
+								segment.removeDetection(contour);
+								break;
+							}
+						}
+						
+						for (ActiveContour child : e.children)
+						{
+							currentContours.add(child);
+							TrackSegment childSegment = new TrackSegment();
+							childSegment.addDetection(child);
+							trackGroup.addTrackSegment(childSegment);
+							
+							if (motherSegment != null && motherSegment.getDetectionList().size() > 0) trackPool.createLink(motherSegment, childSegment);
+						}
+						
+						if (region_flag.getValue()) updateRegionMeans(meanUpdaterService, currentContours, t);
+					}
+					catch (NullPointerException npe)
+					{
+						System.out.println(contour.points.size());
+						
+						currentContours.remove(contour);
+						
+						for (TrackSegment segment : trackGroup.getTrackSegmentList())
+						{
+							if (segment.containsDetection(contour))
+							{
+								segment.removeDetection(contour);
+								break;
+							}
+						}
+						
+						if (region_flag.getValue()) updateRegionMeans(meanUpdaterService, currentContours, t);
+					}
+				}
+			}, contour));
+		}
+		
+		for (Future<?> future : tasks)
+			try
+			{
+				future.get();
+			}
+			catch (InterruptedException e1)
+			{
+				e1.printStackTrace();
+			}
+			catch (ExecutionException e1)
+			{
+				e1.printStackTrace();
+			}
+	}
+	
+	private void computeDeformations(ExecutorService service, final HashSet<ActiveContour> contours, final HashSet<ActiveContour> currentContours)
+	{
+		ArrayList<Future<ActiveContour>> tasks = new ArrayList<Future<ActiveContour>>(contours.size());
+		
+		for (final ActiveContour contour : contours)
+		{
+			tasks.add(service.submit(new Runnable()
+			{
+				public void run()
+				{
+					if (edge_flag.getValue()) contour.updateEdgeForces(edgeDataX, edgeDataY, edge_weight.getValue());
+					
+					if (regul_flag.getValue()) contour.updateInternalForces(regul_weight.getValue());
+					
+					if (region_flag.getValue()) contour.updateRegionForces(region_data, region_weight.getValue(), region_cin.get(contour), region_cout, region_sensitivity.getValue());
+					
+					if (axis_flag.getValue()) contour.updateAxisForces(axis_weight.getValue());
+					
+					if (coupling_flag.getValue())
+					{
+						// warning: feedback must be computed against ALL contours
+						// (including those which have already converged)
+						for (ActiveContour otherContour : currentContours)
+						{
+							if (otherContour == null || otherContour == contour) continue;
+							
+							contour.updateFeedbackForces(otherContour);
+						}
+					}
+				}
+			}, contour));
+		}
+		
+		for (Future<?> future : tasks)
+			try
+			{
+				future.get();
+			}
+			catch (InterruptedException e1)
+			{
+				e1.printStackTrace();
+			}
+			catch (ExecutionException e1)
+			{
+				e1.printStackTrace();
+			}
+	}
+	
+	private void applyDeformations(HashSet<ActiveContour> contours, Rectangle field)
+	{
+		for (ActiveContour contour : contours)
+			contour.move(field, true, contour_timeStep.getValue());
 	}
 	
 	private void storeResult(Sequence rois, Sequence labels, int t)
@@ -618,107 +799,46 @@ public class ActiveContours extends EzPlug implements EzStoppable
 		for (int i = 1; i <= segments.size(); i++)
 		{
 			TrackSegment segment = segments.get(i - 1);
-			ArrayList<Detection> detections = segment.getDetectionList();
-			for (Detection det : detections)
-			{
-				ActiveContour contour = (ActiveContour) det;
-				
-				// store detection parameters
-				Point3d center = new Point3d();
-				for (Point3d p : contour.points)
-					center.add(p);
-				center.scale(1.0 / contour.points.size());
-				contour.setX(center.x);
-				contour.setY(center.y);
-				
-				// output as ROIs
-				if (output_rois.getValue())
-				{
-					ROI2DArea area = new ROI2DArea();
-					area.addShape(contour.path);
-					area.setColor(contour.getColor());
-					area.setT(t);
-					area.setName("Object #" + i);
-					rois.addROI(area, false);
-				}
-				
-				// output as labels
-				if (output_labels.getValue())
-				{
-					Graphics2D g = labelsIMG.createGraphics();
-					g.setColor(new Color(i));
-					g.fill(contour.path);
-				}
-			}
-		}
-	}
-	
-	private void region_updateMeans(int t)
-	{
-		double[] _region_data = region_data.getDataXYAsDouble(0);
-		
-		byte[] _globlMask = region_globl_mask.getDataXYAsByte(0);
-		Arrays.fill(_globlMask, (byte) 0);
-		Graphics2D g_globl_mask = (Graphics2D) region_globl_mask.getGraphics();
-		
-		byte[] _localMask = region_local_mask.getDataXYAsByte(0);
-		Graphics2D g_local_mask = (Graphics2D) region_local_mask.getGraphics();
-		
-		// ArrayList<ActiveContour> currentContours = contoursMap.get(t);
-		ArrayList<ActiveContour> currentContours = new ArrayList<ActiveContour>(trackGroup.getTrackSegmentList().size());
-		for (TrackSegment segment : trackGroup.getTrackSegmentList())
-		{
-			Detection det = segment.getDetectionAtTime(t);
-			if (det != null)
-				currentContours.add((ActiveContour) det);
-		}
-		
-		for (ActiveContour contour : currentContours)
-		{
-			double inSum = 0, inCpt = 0;
+			ActiveContour contour = (ActiveContour) segment.getDetectionAtTime(t);
 			
-			// create a mask for each object for interior mean measuring
-			Arrays.fill(_localMask, (byte) 0);
-			g_local_mask.fill(contour.path);
+			// store detection parameters
+			Point3d center = new Point3d();
+			for (Point3d p : contour.points)
+				center.add(p);
+			center.scale(1.0 / contour.points.size());
+			contour.setX(center.x);
+			contour.setY(center.y);
 			
-			for (int i = 0; i < _localMask.length; i++)
+			// output as ROIs
+			if (output_rois.getValue())
 			{
-				if (_localMask[i] != 0)
-				{
-					inSum += _region_data[i];
-					inCpt++;
-				}
+				ROI2DArea area = new ROI2DArea();
+				area.addShape(contour.path);
+				area.setColor(contour.getColor());
+				area.setT(t);
+				area.setName("Object #" + i);
+				rois.addROI(area, false);
 			}
 			
-			region_cin.put(contour, inSum / inCpt);
-			
-			// add the contour to the global mask for background mean measuring
-			g_globl_mask.fill(contour.path);
-		}
-		
-		double outSum = 0, outCpt = 0;
-		for (int i = 0; i < _globlMask.length; i++)
-		{
-			if (_globlMask[i] == 0)
+			// output as labels
+			if (output_labels.getValue())
 			{
-				outSum += _region_data[i];
-				outCpt++;
+				Graphics2D g = labelsIMG.createGraphics();
+				g.setColor(new Color(i));
+				g.fill(contour.path);
 			}
 		}
-		region_cout = outSum / outCpt;
 	}
 	
 	@Override
 	public void clean()
 	{
-		if (input.getValue() != null)
-			input.getValue().removePainter(painter);
+		if (input.getValue() != null) input.getValue().removePainter(painter);
 		
 		// contoursMap.clear();
 		// contours.clear();
 		// trackGroup.clearTracks();
-		if (region_flag.getValue())
-			region_cin.clear();
+		if (region_flag.getValue()) region_cin.clear();
 	}
 	
 	@Override
