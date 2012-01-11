@@ -88,7 +88,7 @@ public class ActiveContour extends Detection
 	
 	SlidingWindow					convergence;
 	
-	private Vector3d[]				finalForces;
+	private Vector3d[]				modelForces;
 	
 	private Vector3d[]				contourNormals;
 	
@@ -159,7 +159,8 @@ public class ActiveContour extends Detection
 		
 		if (roi instanceof ROI2DArea)
 		{
-			// owner.input.getValue().addPainter(this);
+			// fill holes if any
+			new HoleFiller().fillHoles2D((ROI2DArea) roi);
 			triangulate((ROI2DArea) roi, contour_resolution.getValue());
 		}
 		else
@@ -341,8 +342,7 @@ public class ActiveContour extends Detection
 				}
 			}
 		
-		if (segments.size() == 0)
-			return;
+		if (segments.size() == 0) return;
 		
 		for (Point3d p : segments.get(0))
 		{
@@ -385,8 +385,7 @@ public class ActiveContour extends Detection
 		{
 			if (tail.distance(segments.get(i).getHead()) <= EPSILON)
 				insertAtHeadOf = i;
-			else if (head.distance(segments.get(i).getTail()) <= EPSILON)
-				insertAtTailOf = i;
+			else if (head.distance(segments.get(i).getTail()) <= EPSILON) insertAtTailOf = i;
 		}
 		
 		if (insertAtTailOf >= 0)
@@ -441,16 +440,14 @@ public class ActiveContour extends Detection
 	 */
 	public void reSample(double minFactor, double maxFactor) throws TopologyException
 	{
-		if (getDimension(2) < contour_minArea.getValue())
-			throw new TopologyException(this, new ActiveContour[] {});
+		if (getDimension(2) < contour_minArea.getValue()) throw new TopologyException(this, new ActiveContour[] {});
 		
 		double minLength = contour_resolution.getValue() * minFactor;
 		double maxLength = contour_resolution.getValue() * maxFactor;
 		
 		ActiveContour[] children = checkForLoopOrDivision(contour_resolution.getValue(), contour_minArea.getValue());
 		
-		if (children != null)
-			throw new TopologyException(this, children);
+		if (children != null) throw new TopologyException(this, children);
 		
 		// optimization to avoid multiple points.size() calls (WARNING: n must
 		// be updated manually whenever points is changed)
@@ -465,8 +462,7 @@ public class ActiveContour extends Detection
 			// all points but the last
 			for (int i = 0; i < n - 1; i++)
 			{
-				if (n < 4)
-					return;
+				if (n < 4) return;
 				
 				Point3d pt1 = points.get(i);
 				Point3d pt2 = points.get(i + 1);
@@ -513,9 +509,9 @@ public class ActiveContour extends Detection
 		// re-sampling is done => update internal structures
 		
 		final int nbPoints = n;
-		if (finalForces == null || finalForces.length != nbPoints)
+		if (modelForces == null || modelForces.length != nbPoints)
 		{
-			finalForces = new Vector3d[nbPoints];
+			modelForces = new Vector3d[nbPoints];
 			contourNormals = new Vector3d[nbPoints];
 			feedbackForces = new Vector3d[nbPoints];
 			
@@ -523,7 +519,7 @@ public class ActiveContour extends Detection
 			
 			for (int i = 0; i < nbPoints; i++)
 			{
-				finalForces[i] = new Vector3d();
+				modelForces[i] = new Vector3d();
 				contourNormals[i] = new Vector3d();
 				feedbackForces[i] = new Vector3d();
 				Point3d p = points.get(i);
@@ -579,15 +575,12 @@ public class ActiveContour extends Detection
 					division = false;
 				}
 				
-				if (division)
-					break;
+				if (division) break;
 			}
-			if (division)
-				break;
+			if (division) break;
 		}
 		
-		if (!division)
-			return null;
+		if (!division) return null;
 		
 		end = j - i;
 		ActiveContour c1 = new ActiveContour(this.owner, contour_resolution, contour_minArea, new SlidingWindow(this.convergence.size));
@@ -611,8 +604,7 @@ public class ActiveContour extends Detection
 		
 		if (c1area > minArea)
 		{
-			if (c2area > minArea)
-				return new ActiveContour[] { c1, c2 };
+			if (c2area > minArea) return new ActiveContour[] { c1, c2 };
 			
 			points.clear();
 			points.addAll(c1.points);
@@ -621,8 +613,7 @@ public class ActiveContour extends Detection
 		}
 		else
 		{
-			if (c2area < minArea)
-				return new ActiveContour[] {};
+			if (c2area < minArea) return new ActiveContour[] {};
 			
 			points.clear();
 			points.addAll(c2.points);
@@ -642,18 +633,17 @@ public class ActiveContour extends Detection
 		{
 			if (boundToField && field.contains(p.x, p.y))
 			{
-				force = finalForces[index];
+				force = modelForces[index];
 				force.add(feedbackForces[index]);
 				
 				double disp = force.length();
-				if (disp > maxDisp)
-					force.scale(maxDisp / disp);
+				if (disp > maxDisp) force.scale(maxDisp / disp);
 				
 				p.add(force);
 				force.set(0, 0, 0);
 			}
 			
-			finalForces[index].set(0, 0, 0);
+			modelForces[index].set(0, 0, 0);
 			feedbackForces[index].set(0, 0, 0);
 			
 			index++;
@@ -661,8 +651,7 @@ public class ActiveContour extends Detection
 		normalsNeedUpdate = true;
 		boundingSphereNeedsUpdate = true;
 		
-		if (convergence == null)
-			return;
+		if (convergence == null) return;
 		
 		double value = getDimension(1);
 		convergence.add(value);
@@ -670,8 +659,7 @@ public class ActiveContour extends Detection
 	
 	private void updateNormalsIfNeeded()
 	{
-		if (!normalsNeedUpdate)
-			return;
+		if (!normalsNeedUpdate) return;
 		
 		int n = points.size();
 		
@@ -702,8 +690,7 @@ public class ActiveContour extends Detection
 	
 	public BoundingSphere getBoundingSphere()
 	{
-		if (!boundingSphereNeedsUpdate)
-			return boundingSphere;
+		if (!boundingSphereNeedsUpdate) return boundingSphere;
 		
 		Point3d center = new Point3d();
 		double radius = 0;
@@ -726,8 +713,7 @@ public class ActiveContour extends Detection
 			{
 				double d = p.distance(center);
 				
-				if (d > radius)
-					radius = d;
+				if (d > radius) radius = d;
 			}
 		}
 		boundingSphere.setRadius(radius);
@@ -791,8 +777,7 @@ public class ActiveContour extends Detection
 				// goal: adjust the minimum using the weight, but keep max to 1
 				double threshold = Math.max(colinearity, 1 - weight);
 				
-				if (normal != null)
-					finalForces[i].scale(threshold);
+				if (normal != null) modelForces[i].scale(threshold);
 			}
 		}
 	}
@@ -810,7 +795,7 @@ public class ActiveContour extends Detection
 		for (int i = 0; i < n; i++)
 		{
 			Point3d p = points.get(i);
-			Vector3d f = finalForces[i];
+			Vector3d f = modelForces[i];
 			f.x += weight * getPixelValue(edgeDataX, p.x, p.y);
 			f.y += weight * getPixelValue(edgeDataY, p.x, p.y);
 		}
@@ -833,8 +818,7 @@ public class ActiveContour extends Detection
 	 */
 	void updateRegionForces(IcyBufferedImage region_data, double weight, double cin, double cout, double sensitivity)
 	{
-		if (sensitivity == 0)
-			sensitivity = 1.0;
+		if (sensitivity == 0) sensitivity = 1.0;
 		
 		updateNormalsIfNeeded();
 		
@@ -848,7 +832,7 @@ public class ActiveContour extends Detection
 			try
 			{
 				p = points.get(i);
-				f = finalForces[i];
+				f = modelForces[i];
 				norm = contourNormals[i];
 				val = getPixelValue(region_data, p.x, p.y);
 				inDiff = val - cin;
@@ -893,8 +877,7 @@ public class ActiveContour extends Detection
 		final int i = (int) Math.round(x);
 		final int j = (int) Math.round(y);
 		
-		if (i < 0 || i >= width - 1 || j < 0 || j >= height - 1)
-			return 0;
+		if (i < 0 || i >= width - 1 || j < 0 || j >= height - 1) return 0;
 		
 		double value = 0;
 		
@@ -928,14 +911,14 @@ public class ActiveContour extends Detection
 		curr = points.get(0);
 		next = points.get(1);
 		
-		f = finalForces[0];
+		f = modelForces[0];
 		f.x += weight * (prev.x + next.x - 2 * curr.x);
 		f.y += weight * (prev.y + next.y - 2 * curr.y);
 		
 		// middle points
 		for (int i = 1; i < n - 1; i++)
 		{
-			f = finalForces[i];
+			f = modelForces[i];
 			prev = points.get(i - 1);
 			curr = points.get(i);
 			next = points.get(i + 1);
@@ -945,7 +928,7 @@ public class ActiveContour extends Detection
 		}
 		
 		// last point
-		f = finalForces[n - 1];
+		f = modelForces[n - 1];
 		prev = points.get(n - 2);
 		curr = points.get(n - 1);
 		next = points.get(0);
@@ -1039,8 +1022,7 @@ public class ActiveContour extends Detection
 			{
 				nb++;
 				dist = Line2D.ptLineDist(p1.x, p1.y, p2.x, p2.y, p.x, p.y);
-				if (dist < minDist)
-					minDist = dist;
+				if (dist < minDist) minDist = dist;
 			}
 		}
 		
@@ -1051,8 +1033,7 @@ public class ActiveContour extends Detection
 		{
 			nb++;
 			dist = Line2D.ptLineDist(p1.x, p1.y, p2.x, p2.y, p.x, p.y);
-			if (dist < minDist)
-				minDist = dist;
+			if (dist < minDist) minDist = dist;
 		}
 		
 		// return (nb % 2) == 0;
@@ -1090,8 +1071,7 @@ public class ActiveContour extends Detection
 	
 	public double getDimension(int order)
 	{
-		if (points.size() <= 1)
-			return 0;
+		if (points.size() <= 1) return 0;
 		
 		switch (order)
 		{
@@ -1127,12 +1107,10 @@ public class ActiveContour extends Detection
 	@Override
 	public void paint(Graphics2D g, Sequence sequence, IcyCanvas canvas)
 	{
-		if (getT() != canvas.getPositionT() || !enabled)
-			return;
+		if (getT() != canvas.getPositionT() || !enabled) return;
 		
 		int fontSize = (int) ROI2D.canvasToImageLogDeltaX(canvas, 20);
-		if (fontSize < 1)
-			fontSize = 1;
+		if (fontSize < 1) fontSize = 1;
 		Font font = new Font("Arial", Font.BOLD, fontSize);
 		g.setFont(font);
 		
