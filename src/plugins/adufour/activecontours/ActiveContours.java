@@ -20,6 +20,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -484,15 +485,16 @@ public class ActiveContours extends EzPlug implements EzStoppable
 	
 	private void evolveContours(final int t)
 	{
-		final HashSet<ActiveContour> currentContours = new HashSet<ActiveContour>(trackGroup.getTrackSegmentList().size());
+		// retrieve the contours on the current frame and store them in currentContours
+		final HashSet<ActiveContour> allContours = new HashSet<ActiveContour>(trackGroup.getTrackSegmentList().size());
 		
 		for (TrackSegment segment : trackGroup.getTrackSegmentList())
 		{
 			Detection det = segment.getDetectionAtTime(t);
-			if (det != null) currentContours.add((ActiveContour) det);
+			if (det != null) allContours.add((ActiveContour) det);
 		}
 		
-		if (currentContours.size() == 0) return;
+		if (allContours.size() == 0) return;
 		
 		Rectangle field = new Rectangle(input.getValue().getWidth(), input.getValue().getHeight());
 		
@@ -500,50 +502,51 @@ public class ActiveContours extends EzPlug implements EzStoppable
 		
 		long iter = 0;
 		
-		if (region_flag.getValue()) updateRegionMeans(meanUpdaterService, currentContours, t);
+		if (region_flag.getValue()) updateRegionMeans(meanUpdaterService, allContours, t);
 		
-		while (!globalStop && nbConvergedContours < currentContours.size())
+		final HashSet<ActiveContour> evolvingContours = new HashSet<ActiveContour>(allContours.size());
+		
+		while (!globalStop && nbConvergedContours < allContours.size())
 		{
 			iter++;
 			nbConvergedContours = 0;
 			
 			// update region information every 10 iterations
-			if (region_flag.getValue() && iter % 10 == 0) updateRegionMeans(meanUpdaterService, currentContours, t);
+			if (region_flag.getValue() && iter % 10 == 0) updateRegionMeans(meanUpdaterService, allContours, t);
 			
-			// take a snapshot of the current list of non-converged contours
-			final HashSet<ActiveContour> contours = new HashSet<ActiveContour>(currentContours.size());
-			
-			for (ActiveContour contour : currentContours)
+			// take a snapshot of the current list of evolving (i.e. non-converged) contours
+			evolvingContours.clear();
+			for (ActiveContour contour : allContours)
 			{
 				Double criterion = contour.convergence.computeCriterion(convergence_operation.getValue());
 				
 				if (criterion != null && criterion < convergence_criterion.getValue())
 				{
 					nbConvergedContours++;
-					if (getUI() != null) getUI().setProgressBarValue((double) nbConvergedContours / currentContours.size());
+					if (getUI() != null) getUI().setProgressBarValue((double) nbConvergedContours / allContours.size());
 					continue;
 				}
 				
 				// if the contour hasn't converged yet, store it for the main loop
-				contours.add(contour);
+				evolvingContours.add(contour);
 			}
 			
 			// re-sample the contours to ensure homogeneous resolution
-			resampleContours(mainService, meanUpdaterService, contours, currentContours, t);
+			resampleContours(mainService, meanUpdaterService, evolvingContours, allContours, t);
 			
 			// if coupling is required, contours should all be deformed synchronously
 			if (coupling_flag.getValue())
 			{
 				// compute deformations issued from the energy minimization
-				computeDeformations(mainService, contours, currentContours);
+				computeDeformations(mainService, evolvingContours, allContours);
 				
 				// once they are all computed, apply all deformations at once
-				applyDeformations(contours, field);
+				applyDeformations(evolvingContours, field);
 			}
 			else
 			{
 				// contours can be evolved independently from one another
-				deformContoursAsync(mainService, contours, field);
+				deformContoursAsync(mainService, evolvingContours, field);
 			}
 		}
 	}
@@ -653,15 +656,16 @@ public class ActiveContours extends EzPlug implements EzStoppable
 		region_cout = outSum / outCpt;
 	}
 	
-	private void resampleContours(ExecutorService service, final ExecutorService meanUpdaterService, final HashSet<ActiveContour> contours, final HashSet<ActiveContour> currentContours, final int t)
+	private void resampleContours(ExecutorService service, final ExecutorService meanUpdaterService, final HashSet<ActiveContour> evolvingContours, final HashSet<ActiveContour> allContours,
+			final int t)
 	{
-		ArrayList<Future<ActiveContour>> tasks = new ArrayList<Future<ActiveContour>>(contours.size());
+		ArrayList<Callable<ActiveContour>> tasks = new ArrayList<Callable<ActiveContour>>(evolvingContours.size());
 		
-		for (final ActiveContour contour : contours)
+		for (final ActiveContour contour : evolvingContours)
 		{
-			tasks.add(service.submit(new Runnable()
+			tasks.add(new Callable<ActiveContour>()
 			{
-				public void run()
+				public ActiveContour call()
 				{
 					try
 					{
@@ -669,7 +673,8 @@ public class ActiveContours extends EzPlug implements EzStoppable
 					}
 					catch (TopologyException e)
 					{
-						currentContours.remove(contour);
+						allContours.remove(contour);
+						evolvingContours.remove(contour);
 						
 						TrackSegment motherSegment = null;
 						
@@ -696,21 +701,28 @@ public class ActiveContours extends EzPlug implements EzStoppable
 						
 						for (ActiveContour child : e.children)
 						{
-							currentContours.add(child);
-							TrackSegment childSegment = new TrackSegment();
-							childSegment.addDetection(child);
-							trackGroup.addTrackSegment(childSegment);
-							
-							if (motherSegment != null && motherSegment.getDetectionList().size() > 0) trackPool.createLink(motherSegment, childSegment);
+							try
+							{
+								child.reSample(0.7, 1.4);
+								allContours.add(child);
+								evolvingContours.add(child);
+								TrackSegment childSegment = new TrackSegment();
+								childSegment.addDetection(child);
+								trackGroup.addTrackSegment(childSegment);
+								if (motherSegment != null && motherSegment.getDetectionList().size() > 0) trackPool.createLink(motherSegment, childSegment);
+							}
+							catch (TopologyException tpE)
+							{
+								// do nothing (the child will just not be added)
+							}
 						}
 						
-						if (region_flag.getValue()) updateRegionMeans(meanUpdaterService, currentContours, t);
+						if (region_flag.getValue()) updateRegionMeans(meanUpdaterService, allContours, t);
 					}
 					catch (NullPointerException npe)
 					{
-						System.out.println(contour.points.size());
-						
-						currentContours.remove(contour);
+						allContours.remove(contour);
+						evolvingContours.remove(contour);
 						
 						ArrayList<TrackSegment> segments = trackGroup.getTrackSegmentList();
 						for (int i = 0; i < segments.size(); i++)
@@ -730,36 +742,82 @@ public class ActiveContours extends EzPlug implements EzStoppable
 							}
 						}
 						
-						if (region_flag.getValue()) updateRegionMeans(meanUpdaterService, currentContours, t);
+						if (region_flag.getValue()) updateRegionMeans(meanUpdaterService, allContours, t);
 					}
+					
+					return contour;
 				}
-			}, contour));
+			});
 		}
 		
-		for (Future<?> future : tasks)
-			try
-			{
-				future.get();
-			}
-			catch (InterruptedException e1)
-			{
-				e1.printStackTrace();
-			}
-			catch (ExecutionException e1)
-			{
-				e1.printStackTrace();
-			}
+		try
+		{
+			service.invokeAll(tasks);
+		}
+		catch (InterruptedException e)
+		{
+			e.printStackTrace();
+		}
 	}
 	
-	private void computeDeformations(ExecutorService service, final HashSet<ActiveContour> contours, final HashSet<ActiveContour> currentContours)
+	private void computeDeformations(ExecutorService service, final HashSet<ActiveContour> evolvingContours, final HashSet<ActiveContour> allContours)
 	{
-		ArrayList<Future<ActiveContour>> tasks = new ArrayList<Future<ActiveContour>>(contours.size());
+		// ArrayList<Future<ActiveContour>> tasks = new
+		// ArrayList<Future<ActiveContour>>(evolvingContours.size());
+		//
+		// for (final ActiveContour contour : evolvingContours)
+		// {
+		// tasks.add(service.submit(new Runnable()
+		// {
+		// public void run()
+		// {
+		// if (edge_flag.getValue()) contour.updateEdgeForces(edgeDataX, edgeDataY,
+		// edge_weight.getValue());
+		//
+		// if (regul_flag.getValue()) contour.updateInternalForces(regul_weight.getValue());
+		//
+		// if (region_flag.getValue()) contour.updateRegionForces(region_data,
+		// region_weight.getValue(), region_cin.get(contour), region_cout,
+		// region_sensitivity.getValue());
+		//
+		// if (axis_flag.getValue()) contour.updateAxisForces(axis_weight.getValue());
+		//
+		// if (coupling_flag.getValue())
+		// {
+		// // warning: feedback must be computed against ALL contours
+		// // (including those which have already converged)
+		// for (ActiveContour otherContour : allContours)
+		// {
+		// if (otherContour == null || otherContour == contour) continue;
+		//
+		// contour.updateFeedbackForces(otherContour);
+		// }
+		// }
+		// }
+		// }, contour));
+		// }
+		//
+		// for (Future<?> future : tasks)
+		// try
+		// {
+		// future.get();
+		// }
+		// catch (InterruptedException e1)
+		// {
+		// e1.printStackTrace();
+		// }
+		// catch (ExecutionException e1)
+		// {
+		// e1.printStackTrace();
+		// }
 		
-		for (final ActiveContour contour : contours)
+		ArrayList<Callable<ActiveContour>> tasks = new ArrayList<Callable<ActiveContour>>(evolvingContours.size());
+		
+		for (final ActiveContour contour : evolvingContours)
 		{
-			tasks.add(service.submit(new Runnable()
+			tasks.add(new Callable<ActiveContour>()
 			{
-				public void run()
+				public ActiveContour call()
 				{
 					if (edge_flag.getValue()) contour.updateEdgeForces(edgeDataX, edgeDataY, edge_weight.getValue());
 					
@@ -773,30 +831,27 @@ public class ActiveContours extends EzPlug implements EzStoppable
 					{
 						// warning: feedback must be computed against ALL contours
 						// (including those which have already converged)
-						for (ActiveContour otherContour : currentContours)
+						for (ActiveContour otherContour : allContours)
 						{
 							if (otherContour == null || otherContour == contour) continue;
 							
 							contour.updateFeedbackForces(otherContour);
 						}
 					}
+					
+					return contour;
 				}
-			}, contour));
+			});
 		}
 		
-		for (Future<?> future : tasks)
-			try
-			{
-				future.get();
-			}
-			catch (InterruptedException e1)
-			{
-				e1.printStackTrace();
-			}
-			catch (ExecutionException e1)
-			{
-				e1.printStackTrace();
-			}
+		try
+		{
+			service.invokeAll(tasks);
+		}
+		catch (InterruptedException e)
+		{
+			e.printStackTrace();
+		}
 	}
 	
 	private void applyDeformations(HashSet<ActiveContour> contours, Rectangle field)

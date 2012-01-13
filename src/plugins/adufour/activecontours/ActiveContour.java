@@ -445,14 +445,26 @@ public class ActiveContour extends Detection
 		double minLength = contour_resolution.getValue() * minFactor;
 		double maxLength = contour_resolution.getValue() * maxFactor;
 		
-		ActiveContour[] children = checkForLoopOrDivision(contour_resolution.getValue(), contour_minArea.getValue());
-		
-		if (children != null) throw new TopologyException(this, children);
-		
 		// optimization to avoid multiple points.size() calls (WARNING: n must
 		// be updated manually whenever points is changed)
 		int n = points.size();
 		
+		if (contourNormals == null)
+		{
+			// first pass: update normals once
+			contourNormals = new Vector3d[n];
+			for (int i = 0; i < n; i++)
+				contourNormals[i] = new Vector3d();
+			normalsNeedUpdate = true;
+			updateNormalsIfNeeded();
+		}
+		
+		ActiveContour[] children = checkSelfIntersection(contour_resolution.getValue(), contour_minArea.getValue());
+		
+		if (children != null) throw new TopologyException(this, children);
+		
+		// update the number of total points
+		n = points.size();
 		boolean noChange = false;
 		
 		while (noChange == false)
@@ -554,33 +566,53 @@ public class ActiveContour extends Detection
 	 *         small, or an array of Contour2Ds with 0 elements if both contours are too small, and
 	 *         2 elements if both contours are viable
 	 */
-	private ActiveContour[] checkForLoopOrDivision(double minSpacing, double minArea)
+	private ActiveContour[] checkSelfIntersection(double minSpacing, double minArea)
 	{
 		int i = 0, j = 0, end, n = points.size();
+		Point3d p_i = null, p_j = null;
 		
-		boolean division = false;
+		boolean intersection = false;
 		
 		for (i = 0; i < n; i++)
 		{
-			Point3d pt = points.get(i);
+			p_i = points.get(i);
 			
 			for (j = i + 2; j < n - 1; j++)
 			{
-				division = (pt.distance(points.get(j)) < minSpacing);
+				p_j = points.get(j);
 				
-				if (division && (j == i + 2))
+				intersection = (p_i.distance(p_j) < minSpacing);
+				
+				if (intersection)
 				{
-					points.remove(i + 1);
-					n--;
-					division = false;
+					// deal with the special case that i and j are 2 points away
+					
+					if (i == 0 && j == n - 2)
+					{
+						n--;
+						points.remove(n);
+						intersection = false;
+					}
+					else if (i == 1 && j == n - 1)
+					{
+						points.remove(0);
+						n--;
+						intersection = false;
+					}
+					else if (j == i + 2)
+					{
+						points.remove(i + 1);
+						n--;
+						intersection = false;
+					}
 				}
 				
-				if (division) break;
+				if (intersection) break;
 			}
-			if (division) break;
+			if (intersection) break;
 		}
 		
-		if (!division) return null;
+		if (!intersection) return null;
 		
 		end = j - i;
 		ActiveContour c1 = new ActiveContour(this.owner, contour_resolution, contour_minArea, new SlidingWindow(this.convergence.size));
@@ -596,29 +628,61 @@ public class ActiveContour extends Detection
 		for (int p = 0, pj = p + j; p < end; p++, pj++)
 			c2.addPoint(points.get(pj < n ? pj : pj - n));
 		
-		double c1area = c1.getDimension(2), c2area = c2.getDimension(2);
+		// determine whether the intersection is a loop or a division
+		// rationale: check the normal of the two colliding points (i & j)
+		// if they point away from the junction => division
+		// if they point towards the junction => loop
 		
-		// if only one of the two new contours has a size lower than minArea, then the division
-		// should be considered as a simple loop, thus the remaining contour should inherit the
-		// trackID of the parent contour
+		Vector3d n_i = contourNormals[i];
+		Vector3d i_j = new Vector3d(p_j.x - p_i.x, p_j.y - p_i.y, 0);
 		
-		if (c1area > minArea)
+		if (n_i.dot(i_j) < 0)
 		{
-			if (c2area > minArea) return new ActiveContour[] { c1, c2 };
+			// division => keep c1 and c2 if their size is ok
 			
-			points.clear();
-			points.addAll(c1.points);
+			double c1area = c1.getDimension(2), c2area = c2.getDimension(2);
 			
-			return null;
+			// if only one of the two children has a size lower than minArea, then the division
+			// should be considered as an artifact loop, the other child thus is the new contour
+			
+			if (c1area > minArea)
+			{
+				if (c2area > minArea) return new ActiveContour[] { c1, c2 };
+				
+				points.clear();
+				points.addAll(c1.points);
+				
+				return null;
+			}
+			else
+			{
+				if (c2area < minArea) return new ActiveContour[] {};
+				
+				points.clear();
+				points.addAll(c2.points);
+				
+				return null;
+			}
 		}
 		else
 		{
-			if (c2area < minArea) return new ActiveContour[] {};
+			// loop => keep only the contour with correct orientation
+			// => the contour with a positive algebraic area
 			
-			points.clear();
-			points.addAll(c2.points);
-			
-			return null;
+			if (c1.getAlgebraicArea() < 0)
+			{
+				// c1 is the outer loop => keep it
+				points.clear();
+				points.addAll(c1.points);
+				return null;
+			}
+			else
+			{
+				// c1 is the inner loop => keep c2
+				points.clear();
+				points.addAll(c2.points);
+				return null;
+			}
 		}
 	}
 	
@@ -631,22 +695,29 @@ public class ActiveContour extends Detection
 		
 		for (Point3d p : points)
 		{
-			if (boundToField && field.contains(p.x, p.y))
+			try
 			{
-				force = modelForces[index];
-				force.add(feedbackForces[index]);
+				if (boundToField && field.contains(p.x, p.y))
+				{
+					force = modelForces[index];
+					force.add(feedbackForces[index]);
+					
+					double disp = force.length();
+					if (disp > maxDisp) force.scale(maxDisp / disp);
+					
+					p.add(force);
+					force.set(0, 0, 0);
+				}
 				
-				double disp = force.length();
-				if (disp > maxDisp) force.scale(maxDisp / disp);
+				modelForces[index].set(0, 0, 0);
+				feedbackForces[index].set(0, 0, 0);
 				
-				p.add(force);
-				force.set(0, 0, 0);
+				index++;
 			}
-			
-			modelForces[index].set(0, 0, 0);
-			feedbackForces[index].set(0, 0, 0);
-			
-			index++;
+			catch (NullPointerException e)
+			{
+				e.printStackTrace();
+			}
 		}
 		normalsNeedUpdate = true;
 		boundingSphereNeedsUpdate = true;
