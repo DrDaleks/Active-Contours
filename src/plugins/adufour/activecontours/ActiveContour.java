@@ -150,11 +150,13 @@ public class ActiveContour extends Detection
 		if (roi == null)
 		{
 			EzMessage.message("Please draw or select a ROI", MessageType.ERROR, OutputType.DIALOG);
+			throw new TopologyException(this, null);
 		}
 		
 		if (!(roi instanceof ROI2DEllipse) && !(roi instanceof ROI2DRectangle) && !(roi instanceof ROI2DPolygon) && !(roi instanceof ROI2DArea))
 		{
 			EzMessage.message("Wrong ROI type. Only Rectangle, Ellipse, Polygon and Area are supported", MessageType.ERROR, OutputType.DIALOG);
+			throw new TopologyException(this, null);
 		}
 		
 		if (roi instanceof ROI2DArea)
@@ -169,29 +171,33 @@ public class ActiveContour extends Detection
 			
 			double[] segment = new double[6];
 			
-			PathIterator path = ((ROI2DShape) roi).getPathIterator(null, 0.1);
+			PathIterator pathIterator = ((ROI2DShape) roi).getPathIterator(null, 0.1);
 			
 			// first segment is necessarily a "move to" operation
 			
-			path.currentSegment(segment);
+			pathIterator.currentSegment(segment);
 			addPoint(new Point3d(segment[0], segment[1], 0));
 			
-			while (!path.isDone())
+			while (!pathIterator.isDone())
 			{
-				if (path.currentSegment(segment) == PathIterator.SEG_LINETO)
+				if (pathIterator.currentSegment(segment) == PathIterator.SEG_LINETO)
 				{
 					addPoint(new Point3d(segment[0], segment[1], 0));
 				}
-				path.next();
+				pathIterator.next();
 				
 				// the final one should be a "close" operation, do nothing
 			}
+			// in any case, don't forget to close the path
+			path.closePath();
 		}
 		
-		// in any case, don't forget to close the path
-		path.closePath();
+		if (points.size() == 0) throw new TopologyException(this, null);
 		
-		counterClockWise = (getAlgebraicArea() > 0);
+		double area = getAlgebraicArea();
+		if (Math.abs(area) < contour_minArea.getValue()) throw new TopologyException(this, null);
+		
+		counterClockWise = (area > 0);
 	}
 	
 	public void setConvergenceWindow(SlidingWindow window)

@@ -269,7 +269,7 @@ public class ActiveContours extends EzPlug implements EzStoppable
 			@Override
 			public void actionPerformed(ActionEvent arg0)
 			{
-				if (input.getValue(false) != null)
+				if (input.getValue() != null)
 				{
 					input.getValue().painterChanged(painter);
 				}
@@ -476,7 +476,6 @@ public class ActiveContours extends EzPlug implements EzStoppable
 			{
 				String message = "Warning: contour could not be triangulated. Possible reasons:\n";
 				message += " - binary mask is below the minimum contour area\n";
-				message += " - the binary mask contains a hole";
 				System.out.println(message);
 			}
 			
