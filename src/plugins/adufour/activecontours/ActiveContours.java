@@ -33,10 +33,8 @@ import javax.vecmath.Point3i;
 import plugins.adufour.activecontours.SlidingWindow.Operation;
 import plugins.adufour.connectedcomponents.ConnectedComponent;
 import plugins.adufour.connectedcomponents.ConnectedComponents;
+import plugins.adufour.ezplug.EzException;
 import plugins.adufour.ezplug.EzGroup;
-import plugins.adufour.ezplug.EzMessage;
-import plugins.adufour.ezplug.EzMessage.MessageType;
-import plugins.adufour.ezplug.EzMessage.OutputType;
 import plugins.adufour.ezplug.EzPlug;
 import plugins.adufour.ezplug.EzStoppable;
 import plugins.adufour.ezplug.EzVar;
@@ -298,6 +296,8 @@ public class ActiveContours extends EzPlug implements EzStoppable
 		
 		if (getUI() != null)
 		{
+			getUI().setProgressBarValue(0.0);
+			
 			if (output_rois.getValue())
 			{
 				outputSequence_rois.setName(input.getValue().getName() + " + active contours");
@@ -370,6 +370,9 @@ public class ActiveContours extends EzPlug implements EzStoppable
 			switch (init_type.getValue())
 			{
 				case ROI:
+					
+					if (inSeq.getROI2Ds().isEmpty()) throw new EzException("Please draw or select a ROI", true);
+					
 					for (ROI2D roi : inSeq.getROI2Ds())
 					{
 						if (roi instanceof ROI2DArea)
@@ -425,16 +428,7 @@ public class ActiveContours extends EzPlug implements EzStoppable
 				
 				default:
 				{
-					String message = init_type.getValue().name() + " initialization is currently not supported";
-					if (getUI() != null)
-					{
-						EzMessage.message(message, MessageType.ERROR, OutputType.DIALOG);
-					}
-					else
-					{
-						System.out.println(message);
-					}
-					return;
+					throw new EzException(init_type.getValue().name() + " initialization is currently not supported", true);
 				}
 			}
 		}

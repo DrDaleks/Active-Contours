@@ -27,9 +27,7 @@ import javax.media.j3d.BoundingSphere;
 import javax.vecmath.Point3d;
 import javax.vecmath.Vector3d;
 
-import plugins.adufour.ezplug.EzMessage;
-import plugins.adufour.ezplug.EzMessage.MessageType;
-import plugins.adufour.ezplug.EzMessage.OutputType;
+import plugins.adufour.ezplug.EzException;
 import plugins.adufour.ezplug.EzVarDouble;
 import plugins.adufour.ezplug.EzVarInteger;
 import plugins.nchenouard.spot.Detection;
@@ -147,16 +145,9 @@ public class ActiveContour extends Detection
 	{
 		this(owner, contour_resolution, contour_minArea, convergenceWindow);
 		
-		if (roi == null)
-		{
-			EzMessage.message("Please draw or select a ROI", MessageType.ERROR, OutputType.DIALOG);
-			throw new TopologyException(this, null);
-		}
-		
 		if (!(roi instanceof ROI2DEllipse) && !(roi instanceof ROI2DRectangle) && !(roi instanceof ROI2DPolygon) && !(roi instanceof ROI2DArea))
 		{
-			EzMessage.message("Wrong ROI type. Only Rectangle, Ellipse, Polygon and Area are supported", MessageType.ERROR, OutputType.DIALOG);
-			throw new TopologyException(this, null);
+			throw new EzException("Wrong ROI type. Only Rectangle, Ellipse, Polygon and Area are supported", true);
 		}
 		
 		if (roi instanceof ROI2DArea)
