@@ -249,7 +249,7 @@ public class ActiveContours extends EzPlug implements EzStoppable
 		if (getUI() != null)
 		{
 			// replace any ActiveContours Painter object on the sequence by ours
-			for (Painter painter : input.getValue().getPainters())
+			for (Painter painter : input.getValue(true).getPainters())
 				if (painter instanceof ActiveContoursPainter) input.getValue().removePainter(painter);
 			
 			painter = new ActiveContoursPainter(trackGroup);
@@ -319,7 +319,7 @@ public class ActiveContours extends EzPlug implements EzStoppable
 		
 		if (edge_flag.getValue())
 		{
-			IcyBufferedImage inputImage = edge_input.getValue().getImage(t, region_z.getValue());
+			IcyBufferedImage inputImage = edge_input.getValue(true).getImage(t, region_z.getValue());
 			
 			if (inputImage.getSizeC() > 1) inputImage = inputImage.extractChannel(region_c.getValue());
 			
@@ -344,7 +344,7 @@ public class ActiveContours extends EzPlug implements EzStoppable
 		
 		if (region_flag.getValue())
 		{
-			IcyBufferedImage inputImage = region_input.getValue().getImage(t, region_z.getValue());
+			IcyBufferedImage inputImage = region_input.getValue(true).getImage(t, region_z.getValue());
 			
 			if (inputImage.getSizeC() > 1) inputImage = inputImage.extractChannel(region_c.getValue());
 			
