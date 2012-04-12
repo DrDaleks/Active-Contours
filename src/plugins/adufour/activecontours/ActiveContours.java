@@ -45,6 +45,7 @@ import plugins.adufour.ezplug.EzVarInteger;
 import plugins.adufour.ezplug.EzVarListener;
 import plugins.adufour.ezplug.EzVarSequence;
 import plugins.adufour.filtering.Convolution1D;
+import plugins.adufour.filtering.ConvolutionException;
 import plugins.adufour.filtering.Kernels1D;
 import plugins.adufour.thresholder.Thresholder;
 import plugins.fab.trackmanager.TrackGroup;
@@ -329,14 +330,28 @@ public class ActiveContours extends EzPlug implements EzStoppable
 			Sequence gradX = new Sequence(inputImage.convertToType(DataType.DOUBLE, true));
 			
 			// smooth the signal first
-			Convolution1D.convolve(gradX, gaussian, gaussian, null);
+			try
+			{
+				Convolution1D.convolve(gradX, gaussian, gaussian, null);
+			}
+			catch (ConvolutionException e)
+			{
+				throw new EzException("Cannot smooth the signal: " + e.getMessage(), true);
+			}
 			
 			// clone into gradY
 			Sequence gradY = gradX.getCopy();
 			
 			// compute the gradient in each direction
-			Convolution1D.convolve(gradX, gradient, null, null);
-			Convolution1D.convolve(gradY, null, gradient, null);
+			try
+			{
+				Convolution1D.convolve(gradX, gradient, null, null);
+				Convolution1D.convolve(gradY, null, gradient, null);
+			}
+			catch (ConvolutionException e)
+			{
+				throw new EzException("Cannot compute the gradient information: " + e.getMessage(), true);
+			}
 			
 			edgeDataX = gradX.getFirstImage();
 			edgeDataY = gradY.getFirstImage();
