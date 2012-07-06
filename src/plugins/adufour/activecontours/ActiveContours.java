@@ -49,6 +49,7 @@ import plugins.adufour.filtering.ConvolutionException;
 import plugins.adufour.filtering.Kernels1D;
 import plugins.adufour.thresholder.Thresholder;
 import plugins.fab.trackmanager.TrackGroup;
+import plugins.fab.trackmanager.TrackManager;
 import plugins.fab.trackmanager.TrackPool;
 import plugins.fab.trackmanager.TrackSegment;
 import plugins.nchenouard.spot.Detection;
@@ -309,8 +310,22 @@ public class ActiveContours extends EzPlug implements EzStoppable
 				outputSequence_labels.setName("labels found in " + input.getValue().getName());
 				addSequence(outputSequence_labels);
 			}
+			
+			if (tracking.getValue())
+			{
 			SwimmingObject object = new SwimmingObject(trackGroup);
 			trackPool.addResult(object);
+			
+			
+            ThreadUtil.invokeLater(new Runnable()
+            {
+                public void run()
+                {
+                    TrackManager tm = new TrackManager();
+                    tm.setDisplaySequence(input.getValue());
+                }
+            });
+			}
 		}
 	}
 	
