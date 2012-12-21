@@ -9,5 +9,6 @@
 	<classpathentry combineaccessrules="false" kind="src" path="/EzPlug"/>
 	<classpathentry combineaccessrules="false" kind="src" path="/Filter-Toolbox"/>
 	<classpathentry combineaccessrules="false" kind="src" path="/Thresholder"/>
+	<classpathentry combineaccessrules="false" kind="src" path="/Blocks"/>
 	<classpathentry kind="output" path="bin"/>
 </classpath>
