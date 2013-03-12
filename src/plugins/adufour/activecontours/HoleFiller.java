@@ -39,7 +39,7 @@ public class HoleFiller extends EzPlug
         int height = bin.getBounds().height;
         int slice = width * height;
         
-        boolean[] in = bin.getAsBooleanMask(bin.getBounds());
+        boolean[] in = bin.getBooleanMask(bin.getBounds());
         boolean bgValue = false, fillValue = true;
         
         final byte[] pixels = new byte[in.length];
