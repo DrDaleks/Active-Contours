@@ -209,7 +209,7 @@ public class ActiveContour extends Detection
         int cubeHeight = grid * bounds.width;
         int cubeDiag = cubeWidth + cubeHeight;
         
-        boolean[] mask = roi.getAsBooleanMask(roi.getBounds());
+        boolean[] mask = roi.getBooleanMask(roi.getBounds());
         // erase first line and first row to ensure closed contours
         java.util.Arrays.fill(mask, 0, bounds.width - 1, false);
         for (int o = 0; o < mask.length; o += bounds.width)
@@ -951,7 +951,7 @@ public class ActiveContour extends Detection
         
         final int offset = i + j * width;
         final int offset_plus_1 = offset + 1; // saves 1 addition
-        //double[] data = image.getDataXYAsDouble(0);
+        // double[] data = image.getDataXYAsDouble(0);
         Object data = image.getDataXY(0);
         double max = image.getChannelTypeMax(0);
         DataType type = image.getDataType_();
@@ -962,10 +962,12 @@ public class ActiveContour extends Detection
         final double mx = 1 - x;
         final double my = 1 - y;
         
-        value += mx * my * Array1DUtil.getValue(data, offset, type) / max;//data[offset];
-        value += x * my * Array1DUtil.getValue(data, offset_plus_1, type) / max;//data[offset_plus_1];
-        value += mx * y * Array1DUtil.getValue(data, offset + width, type) / max;//data[offset + width];
-        value += x * y * Array1DUtil.getValue(data, offset_plus_1 + width, type) / max;//data[offset_plus_1 + width];
+        value += mx * my * Array1DUtil.getValue(data, offset, type) / max;// data[offset];
+        value += x * my * Array1DUtil.getValue(data, offset_plus_1, type) / max;// data[offset_plus_1];
+        value += mx * y * Array1DUtil.getValue(data, offset + width, type) / max;// data[offset +
+                                                                                 // width];
+        value += x * y * Array1DUtil.getValue(data, offset_plus_1 + width, type) / max;// data[offset_plus_1
+                                                                                       // + width];
         
         return value;
     }
@@ -1192,5 +1194,10 @@ public class ActiveContour extends Detection
         g.setColor(getColor());
         
         g.draw(path);
+    }
+    
+    public ArrayList<Point3d> getPoints()
+    {
+        return points;
     }
 }
