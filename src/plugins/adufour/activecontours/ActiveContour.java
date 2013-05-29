@@ -699,6 +699,8 @@ public class ActiveContour extends Detection
                     force = modelForces[index];
                     force.add(feedbackForces[index]);
                     
+                    force.scale(timeStep);
+                    
                     double disp = force.length();
                     if (disp > maxDisp) force.scale(maxDisp / disp);
                     
@@ -850,6 +852,21 @@ public class ActiveContour extends Detection
         }
     }
     
+    void updateBalloonForces(IcyBufferedImage data, double weight)
+    {
+        int n = points.size();
+        updateNormalsIfNeeded();
+        
+        
+        for (int i = 0; i < n; i++)
+        {
+            Vector3d f = modelForces[i];
+            
+            f.x += weight * contourNormals[i].x;
+            f.y += weight * contourNormals[i].y;
+        }
+    }
+    
     /**
      * Update edge term of the contour evolution according to the image gradient
      * 
@@ -859,13 +876,17 @@ public class ActiveContour extends Detection
     void updateEdgeForces(IcyBufferedImage edgeDataX, IcyBufferedImage edgeDataY, double weight)
     {
         int n = points.size();
+        updateNormalsIfNeeded();
+        
+        Vector3d grad = new Vector3d();
         
         for (int i = 0; i < n; i++)
         {
             Point3d p = points.get(i);
             Vector3d f = modelForces[i];
-            f.x += weight * getPixelValue(edgeDataX, p.x, p.y);
-            f.y += weight * getPixelValue(edgeDataY, p.x, p.y);
+            grad.set(getPixelValue(edgeDataX, p.x, p.y), getPixelValue(edgeDataY, p.x, p.y), 0.0);
+            grad.scale(weight);
+            f.add(grad);
         }
     }
     
@@ -884,7 +905,7 @@ public class ActiveContour extends Detection
      * @param sensitivity
      *            set 1 for default, lower than 1 for high SNRs and vice-versa
      */
-    void updateRegionForces(IcyBufferedImage region_data, double weight, double cin, double cout, double sensitivity)
+    void updateRegionForces(IcyBufferedImage region_data, double weight, double cin, double cout, double sensitivity, double dataMax)
     {
         if (sensitivity == 0) sensitivity = 1.0;
         
@@ -906,7 +927,7 @@ public class ActiveContour extends Detection
             // bounds check
             if (p.x < 1 || p.y < 1 || p.x >= w - 1 || p.y >= h - 1) continue;
             
-            val = getPixelValue(region_data, p.x, p.y);
+            val = getPixelValue(region_data, p.x, p.y) / dataMax;
             inDiff = val - cin;
             outDiff = val - cout;
             sensitivity = (1 / Math.max(cout * 2, cin));
@@ -1006,8 +1027,8 @@ public class ActiveContour extends Detection
         curr = points.get(n - 1);
         next = points.get(0);
         
-        f.x += weight * (prev.x + next.x - 2 * curr.x);// / contour_resolution.getValue();
-        f.y += weight * (prev.y + next.y - 2 * curr.y);// / contour_resolution.getValue();
+        f.x += 0.5 * weight * (prev.x + next.x - 2 * curr.x) / contour_resolution.getValue();
+        f.y += 0.5 * weight * (prev.y + next.y - 2 * curr.y) / contour_resolution.getValue();
     }
     
     /**
