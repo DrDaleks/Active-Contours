@@ -1,7 +1,7 @@
 package plugins.adufour.activecontours;
 
 import icy.canvas.IcyCanvas;
-import icy.painter.PainterAdapter;
+import icy.painter.Overlay;
 import icy.sequence.Sequence;
 
 import java.awt.Graphics2D;
@@ -12,27 +12,27 @@ import plugins.fab.trackmanager.TrackGroup;
 import plugins.fab.trackmanager.TrackSegment;
 import plugins.nchenouard.spot.Detection;
 
-public class ActiveContoursPainter extends PainterAdapter
+public class ActiveContoursOverlay extends Overlay
 {
 	private HashMap<Integer, ArrayList<ActiveContour>>	contoursMap;
 	
 	private TrackGroup									trackPool;
 	
-	public ActiveContoursPainter(HashMap<Integer, ArrayList<ActiveContour>> contours)
+	public ActiveContoursOverlay(HashMap<Integer, ArrayList<ActiveContour>> contours)
 	{
+	    super("Active contours");
 		contoursMap = contours;
 	}
 	
-	public ActiveContoursPainter(TrackGroup trackPool)
+	public ActiveContoursOverlay(TrackGroup trackPool)
 	{
+	    super("Active contours");
 		this.trackPool = trackPool;
 	}
 	
 	@Override
 	public void paint(Graphics2D g, Sequence sequence, IcyCanvas canvas)
 	{
-		super.paint(g, sequence, canvas);
-		
 		int t = canvas.getPositionT();
 		
 		if (trackPool == null)

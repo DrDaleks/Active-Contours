@@ -520,6 +520,11 @@ public class ActiveContour extends Detection
         final int nbPoints = n;
         if (modelForces == null || modelForces.length != nbPoints)
         {
+            //Path2D.Double path = new Path2D.Double();
+            
+            synchronized (path)
+            {
+                
             modelForces = new Vector3d[nbPoints];
             contourNormals = new Vector3d[nbPoints];
             feedbackForces = new Vector3d[nbPoints];
@@ -544,6 +549,9 @@ public class ActiveContour extends Detection
             }
             
             path.closePath();
+            
+            }
+//            this.path = path;
         }
         
         normalsNeedUpdate = true;
@@ -852,11 +860,10 @@ public class ActiveContour extends Detection
         }
     }
     
-    void updateBalloonForces(IcyBufferedImage data, double weight)
+    void updateBalloonForces(double weight)
     {
         int n = points.size();
         updateNormalsIfNeeded();
-        
         
         for (int i = 0; i < n; i++)
         {
@@ -905,9 +912,11 @@ public class ActiveContour extends Detection
      * @param sensitivity
      *            set 1 for default, lower than 1 for high SNRs and vice-versa
      */
-    void updateRegionForces(IcyBufferedImage region_data, double weight, double cin, double cout, double sensitivity, double dataMax)
+    void updateRegionForces(IcyBufferedImage region_data, double weight, double cin, double cout)
     {
-        if (sensitivity == 0) sensitivity = 1.0;
+        double dataMax = region_data.getChannelMax(0);
+        
+        double sensitivity = (1 / Math.max(cout * 2, cin));
         
         updateNormalsIfNeeded();
         
@@ -931,7 +940,7 @@ public class ActiveContour extends Detection
             inDiff = val - cin;
             outDiff = val - cout;
             sensitivity = (1 / Math.max(cout * 2, cin));
-            sum = weight * contour_resolution.getValue() * (sensitivity * (outDiff * outDiff) - (inDiff * inDiff) / sensitivity);
+            sum = weight * contour_resolution.getValue() * (sensitivity * (outDiff * outDiff) - (inDiff * inDiff));
             
             if (counterClockWise)
             {
@@ -997,6 +1006,8 @@ public class ActiveContour extends Detection
     {
         int n = points.size();
         
+        if (n < 3) return;
+        
         Vector3d f;
         Point3d prev, curr, next;
         
@@ -1027,8 +1038,8 @@ public class ActiveContour extends Detection
         curr = points.get(n - 1);
         next = points.get(0);
         
-        f.x += 0.5 * weight * (prev.x + next.x - 2 * curr.x) / contour_resolution.getValue();
-        f.y += 0.5 * weight * (prev.y + next.y - 2 * curr.y) / contour_resolution.getValue();
+        f.x += weight * (prev.x + next.x - 2 * curr.x) / contour_resolution.getValue();
+        f.y += weight * (prev.y + next.y - 2 * curr.y) / contour_resolution.getValue();
     }
     
     /**
@@ -1214,7 +1225,10 @@ public class ActiveContour extends Detection
         
         g.setColor(getColor());
         
-        g.draw(path);
+        synchronized (path)
+        {
+            g.draw(path);
+        }
     }
     
     public ArrayList<Point3d> getPoints()

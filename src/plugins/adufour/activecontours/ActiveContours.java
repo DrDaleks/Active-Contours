@@ -7,20 +7,19 @@ import icy.painter.Painter;
 import icy.roi.ROI;
 import icy.roi.ROI2D;
 import icy.roi.ROI2DArea;
+import icy.sequence.DimensionId;
 import icy.sequence.Sequence;
 import icy.sequence.SequenceUtil;
 import icy.swimmingPool.SwimmingObject;
+import icy.system.IcyHandledException;
 import icy.system.SystemUtil;
 import icy.system.thread.ThreadUtil;
 import icy.type.DataType;
 import icy.type.collection.array.Array1DUtil;
 import icy.util.StringUtil;
 
-import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
-import java.awt.event.ActionEvent;
-import java.awt.event.ActionListener;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -32,7 +31,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
-import javax.swing.Timer;
 import javax.vecmath.Point3d;
 import javax.vecmath.Point3i;
 
@@ -47,6 +45,7 @@ import plugins.adufour.ezplug.EzPlug;
 import plugins.adufour.ezplug.EzStoppable;
 import plugins.adufour.ezplug.EzVar;
 import plugins.adufour.ezplug.EzVarBoolean;
+import plugins.adufour.ezplug.EzVarDimensionPicker;
 import plugins.adufour.ezplug.EzVarDouble;
 import plugins.adufour.ezplug.EzVarEnum;
 import plugins.adufour.ezplug.EzVarInteger;
@@ -55,7 +54,6 @@ import plugins.adufour.ezplug.EzVarSequence;
 import plugins.adufour.filtering.Convolution1D;
 import plugins.adufour.filtering.ConvolutionException;
 import plugins.adufour.filtering.Kernels1D;
-import plugins.adufour.thresholder.Thresholder;
 import plugins.adufour.vars.lang.VarROIArray;
 import plugins.fab.trackmanager.TrackGroup;
 import plugins.fab.trackmanager.TrackManager;
@@ -65,42 +63,28 @@ import plugins.nchenouard.spot.Detection;
 
 public class ActiveContours extends EzPlug implements EzStoppable, Block
 {
-    public enum Initialization
-    {
-        ROI, ISOVALUE
-    }
+    private final double                   EPSILON               = 0.0000001;
     
     public final EzVarSequence             input                 = new EzVarSequence("Input");
     private Sequence                       inputData;
     
-    public final EzVarEnum<Initialization> init_type             = new EzVarEnum<Initialization>("Initialize from", Initialization.values());
     public final EzVarDouble               init_isovalue         = new EzVarDouble("Isovalue", 1, 0, 1000000, 0.01);
     
-    public final EzGroup                   regul                 = new EzGroup("Regularization");
-    public final EzVarBoolean              regul_flag            = new EzVarBoolean("Regularization", true);
-    public final EzVarDouble               regul_weight          = new EzVarDouble("regul. weight", 0.05, 0, 1.0, 0.01);
+    public final EzVarDouble               regul_weight          = new EzVarDouble("Contour smoothness", 0.05, 0, 1.0, 0.01);
     
-    public final EzGroup                   edge                  = new EzGroup("Gradient-based evolution");
-    public final EzVarBoolean              edge_flag             = new EzVarBoolean("Use gradient", false);
-    public final EzVarSequence             edge_input            = new EzVarSequence("source data");
-    private Sequence                       edgeData;
-    public final EzVarInteger              edge_c                = new EzVarInteger("Input channel", 0, 0, 1);
-    public final EzVarInteger              edge_z                = new EzVarInteger("Input Z slice", 0, 0, 1);
-    public final EzVarDouble               edge_weight           = new EzVarDouble("edge weight", 0, -1, 1, 0.1);
+    public final EzGroup                   edge                  = new EzGroup("Find bright/dark edges");
+    public final EzVarDimensionPicker      edge_c                = new EzVarDimensionPicker("Find edges in channel", DimensionId.C, input);
+    public final EzVarDouble               edge_weight           = new EzVarDouble("Edge weight", 0, -1, 1, 0.1);
     
-    public final EzGroup                   region                = new EzGroup("Region-based evolution");
-    public final EzVarBoolean              region_flag           = new EzVarBoolean("Use region", true);
-    public final EzVarSequence             region_input          = new EzVarSequence("source data");
-    private Sequence                       regionData;
-    public final EzVarInteger              region_c              = new EzVarInteger("Input channel", 0, 0, 1);
-    public final EzVarInteger              region_z              = new EzVarInteger("Input Z slice", 0, 0, 1);
-    public final EzVarDouble               region_weight         = new EzVarDouble("region weight", 1.0, 0.0, 1.0, 0.1);
-    public final EzVarDouble               region_sensitivity    = new EzVarDouble("region sensitivity", 1.0, 0.1, 20.0, 0.1);
+    public final EzGroup                   region                = new EzGroup("Find homogeneous intensity areas");
+    public final EzVarDimensionPicker      region_c              = new EzVarDimensionPicker("Find regions in channel", DimensionId.C, input);
+    public final EzVarDouble               region_weight         = new EzVarDouble("Region weight", 1.0, 0.0, 1.0, 0.1);
+    
+    public final EzVarDouble               balloon_weight        = new EzVarDouble("Contour inflation", 0, -0.5, 0.5, 0.001);
+    
+    public final EzVarDouble               axis_weight           = new EzVarDouble("Axis constraint", 0, 0.0, 1, 0.1);
+    
     public final EzVarBoolean              coupling_flag         = new EzVarBoolean("Multi-contour coupling", true);
-    
-    public final EzGroup                   axis                  = new EzGroup("Long-axis constraint");
-    public final EzVarBoolean              axis_flag             = new EzVarBoolean("Use axis constraint", false);
-    public final EzVarDouble               axis_weight           = new EzVarDouble("axis weight", 0.5, 0.0, 1, 0.1);
     
     public final EzGroup                   evolution             = new EzGroup("Evolution parameters");
     public final EzVarDouble               contour_resolution    = new EzVarDouble("Contour resolution", 2, 0.1, 1000.0, 0.1);
@@ -110,11 +94,9 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     public final EzVarEnum<Operation>      convergence_operation = new EzVarEnum<SlidingWindow.Operation>("Convergence operation", Operation.values(), Operation.VAR_COEFF);
     public final EzVarDouble               convergence_criterion = new EzVarDouble("Convergence criterion", 0.001, 0, 0.1, 0.001);
     
-    public final EzGroup                   output                = new EzGroup("Output");
-    public final EzVarBoolean              output_rois           = new EzVarBoolean("Regions Of Interests", true);
-    public final EzVarBoolean              output_labels         = new EzVarBoolean("Labeled sequence", false);
+    public final EzVarBoolean              output_rois           = new EzVarBoolean("Regions of interest (ROI)", true);
     
-    public final EzVarBoolean              tracking              = new EzVarBoolean("Tracking", false);
+    public final EzVarBoolean              tracking              = new EzVarBoolean("Track objects over time", false);
     
     private IcyBufferedImage               edgeDataX, edgeDataY;
     private IcyBufferedImage               region_data;
@@ -123,10 +105,6 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     private IcyBufferedImage               region_globl_mask;
     private Graphics2D                     region_globl_mask_graphics;
     private HashMap<ActiveContour, Double> region_cin            = new HashMap<ActiveContour, Double>(0);
-    private double                         region_data_max       = 1.0;
-    // live feed
-    // Object _region_data = null;
-    // DataType region_data_type = DataType.UNDEFINED;
     
     private VarROIArray                    roiInput              = new VarROIArray("input ROI");
     private VarROIArray                    roiOutput             = new VarROIArray("Regions of interest");
@@ -137,7 +115,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     private final TrackPool                trackPool             = new TrackPool();
     private TrackGroup                     trackGroup;
     
-    private ActiveContoursPainter          painter;
+    private ActiveContoursOverlay          painter;
     
     private ExecutorService                mainService           = Executors.newFixedThreadPool(SystemUtil.getAvailableProcessors());
     private ExecutorService                meanUpdaterService    = Executors.newFixedThreadPool(SystemUtil.getAvailableProcessors());
@@ -147,81 +125,29 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     {
         addEzComponent(input);
         
-        addEzComponent(init_type);
-        addEzComponent(init_isovalue);
-        init_type.addVisibilityTriggerTo(init_isovalue, Initialization.ISOVALUE);
-        
         // regul
-        regul_flag.setToolTipText("Sets the contour(s) to remain smooth during its evolution");
-        addEzComponent(regul_flag);
-        regul.addEzComponent(regul_weight);
         regul_weight.setToolTipText("Higher values result in a smoother contour, but may also slow its growth");
-        addEzComponent(regul);
-        regul_flag.addVisibilityTriggerTo(regul, true);
+        addEzComponent(regul_weight);
         
         // edge
-        edge_flag.setToolTipText("Sets the contour(s) to follow image intensity gradients");
-        addEzComponent(edge_flag);
+        edge.setToolTipText("Sets the contour(s) to follow image intensity gradients");
         edge_weight.setToolTipText("Negative (resp. positive) weight pushes contours toward decreasing (resp. increasing) intensities");
-        edge.addEzComponent(edge_input, edge_c, edge_z, edge_weight);
+        edge.addEzComponent(edge_c, edge_weight);
         addEzComponent(edge);
-        edge_flag.addVisibilityTriggerTo(edge, true);
-        edge_input.addVarChangeListener(new EzVarListener<Sequence>()
-        {
-            @Override
-            public void variableChanged(EzVar<Sequence> source, Sequence newValue)
-            {
-                if (newValue != null)
-                {
-                    int nC = newValue.getSizeC();
-                    int nZ = newValue.getSizeZ();
-                    
-                    edge_c.setValue(0);
-                    edge_c.setVisible(nC > 1);
-                    edge_c.setMaxValue(nC - 1);
-                    
-                    edge_z.setValue(0);
-                    edge_z.setVisible(nZ > 1);
-                    edge_z.setMaxValue(nZ - 1);
-                }
-            }
-        });
         
         // region
-        region_flag.setToolTipText("Sets the contour(s) to isolate homogeneous intensity regions");
-        addEzComponent(region_flag);
-        //region_sensitivity.setToolTipText("Higher values improve the sensitivity to dim objects");
-        region.addEzComponent(region_input, region_c, region_z, region_weight);//, region_sensitivity);
+        region.setToolTipText("Sets the contour(s) to isolate homogeneous intensity regions");
+        region_weight.setToolTipText("Set to 0 to deactivate this parameter");
+        region.addEzComponent(region_c, region_weight);
         addEzComponent(region);
-        region_flag.addVisibilityTriggerTo(region, true);
-        region_input.addVarChangeListener(new EzVarListener<Sequence>()
-        {
-            @Override
-            public void variableChanged(EzVar<Sequence> source, Sequence newValue)
-            {
-                if (newValue != null)
-                {
-                    int nC = newValue.getSizeC();
-                    int nZ = newValue.getSizeZ();
-                    
-                    region_c.setValue(0);
-                    region_c.setVisible(nC > 1);
-                    region_c.setMaxValue(nC - 1);
-                    
-                    region_z.setValue(0);
-                    region_z.setVisible(nZ > 1);
-                    region_z.setMaxValue(nZ - 1);
-                }
-            }
-        });
+        
+        // balloon force
+        balloon_weight.setToolTipText("Positive (resp. negative) values will inflate (resp. deflate) the contour");
+        addEzComponent(balloon_weight);
         
         // axis contraint
-        axis_flag.setToolTipText("Sets the contour(s) to deform mostly along its principal axis");
-        addEzComponent(axis_flag);
         axis_weight.setToolTipText("Higher values restrict the evolution along the principal axis");
-        axis.addEzComponent(axis_weight);
-        axis_flag.addVisibilityTriggerTo(axis, true);
-        addEzComponent(axis);
+        addEzComponent(axis_weight);
         
         // coupling
         coupling_flag.setToolTipText("Prevents multiple contours from overlapping");
@@ -231,17 +157,24 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         contour_resolution.setToolTipText("Sets the contour(s) precision as the distance (in pixels) between control points");
         contour_minArea.setToolTipText("Contours with a surface (in pixels) below this value will be removed");
         contour_timeStep.setToolTipText("Defines the evolution speed (warning: keep a low value to avoid vibration effects)");
-        convergence_winSize.setToolTipText("Defines over how many iterations the algorithm should check for convergence");
-        convergence_operation.setToolTipText("Defines the operation used to detect convergence");
+        //convergence_winSize.setToolTipText("Defines over how many iterations the algorithm should check for convergence");
+        //convergence_operation.setToolTipText("Defines the operation used to detect convergence");
         convergence_criterion.setToolTipText("Defines the value of the criterion used to detect convergence");
-        evolution.addEzComponent(contour_resolution, contour_minArea, contour_timeStep, convergence_winSize, convergence_operation, convergence_criterion);
+        evolution.addEzComponent(contour_resolution, contour_minArea, contour_timeStep, convergence_criterion);
         addEzComponent(evolution);
+        
+        contour_resolution.addVarChangeListener(new EzVarListener<Double>()
+        {
+            @Override
+            public void variableChanged(EzVar<Double> source, Double newValue)
+            {
+                convergence_winSize.setValue((int) (100.0 / newValue));
+            }
+        });
         
         // output
         output_rois.setToolTipText("Clone the original sequence and with results overlayed as ROIs");
-        output_labels.setToolTipText("Creates a labeled sequence with all rasterized contours");
-        output.addEzComponent(output_rois, output_labels);
-        addEzComponent(output);
+        addEzComponent(output_rois);
         
         tracking.setToolTipText("Track objects over time and export results to the track manager");
         addEzComponent(tracking);
@@ -252,9 +185,8 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     @Override
     public void execute()
     {
+        roiOutput.setValue(null);
         inputData = input.getValue(true);
-        if (edge_flag.getValue()) edgeData = edge_input.getValue(true);
-        if (region_flag.getValue()) regionData = region_input.getValue(true);
         
         globalStop = false;
         
@@ -281,49 +213,29 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             roiInput.setValue(new ROI[0]);
             // replace any ActiveContours Painter object on the sequence by ours
             for (Painter painter : inputData.getPainters())
-                if (painter instanceof ActiveContoursPainter) inputData.removePainter(painter);
+                if (painter instanceof ActiveContoursOverlay) inputData.removePainter(painter);
             
-            painter = new ActiveContoursPainter(trackGroup);
+            painter = new ActiveContoursOverlay(trackGroup);
             inputData.addPainter(painter);
             
             if (inputData.getFirstViewer() != null)
             {
-                startT = inputData.getFirstViewer().getT();
+                startT = inputData.getFirstViewer().getPositionT();
             }
         }
         
-        final Timer repaintTimer = new Timer(100, null);
-        repaintTimer.addActionListener(new ActionListener()
-        {
-            @Override
-            public void actionPerformed(ActionEvent arg0)
-            {
-                if (inputData != null)
-                {
-                    inputData.painterChanged(null);
-                }
-                else
-                {
-                    repaintTimer.stop();
-                }
-            }
-        });
-        
         Sequence outputSequence_rois = output_rois.getValue() ? SequenceUtil.getCopy(inputData) : null;
-        Sequence outputSequence_labels = output_labels.getValue() ? new Sequence() : null;
         
         for (int t = startT; t <= endT; t++)
         {
             if (globalStop || Thread.currentThread().isInterrupted()) break;
-            if (getUI() != null && inputData.getFirstViewer() != null) inputData.getFirstViewer().setT(t);
+            if (getUI() != null && inputData.getFirstViewer() != null) inputData.getFirstViewer().setPositionT(t);
             initContours(t, t == startT);
-            repaintTimer.start();
             evolveContours(t);
             ThreadUtil.sleep(200);
-            repaintTimer.stop();
             
             // store detections and results
-            storeResult(outputSequence_labels, t);
+            storeResult(t);
         }
         
         if (getUI() != null)
@@ -336,11 +248,6 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 for (ROI roi : roiOutput.getValue())
                     outputSequence_rois.addROI(roi, false);
                 addSequence(outputSequence_rois);
-            }
-            if (output_labels.getValue())
-            {
-                outputSequence_labels.setName("labels found in " + inputData.getName());
-                addSequence(outputSequence_labels);
             }
             
             if (tracking.getValue())
@@ -364,16 +271,18 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     {
         // Initialize the image data
         
-        if (edge_flag.getValue())
+        if (Math.abs(edge_weight.getValue()) > EPSILON)
         {
-            IcyBufferedImage inputImage = edgeData.getImage(t, edge_z.getValue());
+            int z = inputData.getFirstViewer().getPositionZ();
             
-            if (inputImage.getSizeC() > 1) inputImage = IcyBufferedImageUtil.extractChannel(inputImage, edge_c.getValue());
+            IcyBufferedImage edgeInputData = inputData.getSizeC() > 1 ? inputData.getImage(t, z, edge_c.getValue()) : inputData.getImage(t, z);
+            
+            if (edgeInputData == null) throw new IcyHandledException("The edge input data is invalid. Make sure the selected channel is valid.");
             
             Sequence gradient = Kernels1D.GRADIENT.toSequence();
             Sequence gaussian = Kernels1D.CUSTOM_GAUSSIAN.createGaussianKernel1D(1.0).toSequence();
             
-            Sequence gradX = new Sequence(IcyBufferedImageUtil.convertToType(inputImage, DataType.DOUBLE, true));
+            Sequence gradX = new Sequence(IcyBufferedImageUtil.convertToType(edgeInputData, DataType.DOUBLE, true));
             
             // smooth the signal first
             // TODO uncomment if necessary
@@ -404,20 +313,15 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             edgeDataY = gradY.getFirstImage();
         }
         
-        if (region_flag.getValue())
+        if (region_weight.getValue() > EPSILON)
         {
-            IcyBufferedImage inputImage;
+            int z = inputData.getFirstViewer().getPositionZ();
             
-            if (regionData.getSizeC() > 1)
-                inputImage = regionData.getImage(t, region_z.getValue(), region_c.getValue());
-            else inputImage = regionData.getImage(t, region_z.getValue());
+            IcyBufferedImage regionInputData = inputData.getSizeC() > 1 ? inputData.getImage(t, z, region_c.getValue()) : inputData.getImage(t, z);
             
-            region_data = IcyBufferedImageUtil.convertToType(inputImage, DataType.DOUBLE, true);
+            if (regionInputData == null) throw new IcyHandledException("The region input data is invalid.  Make sure the selected channel is valid.");
             
-            region_data_max = region_data.getChannelTypeMax(0);
-            
-            // uncomment for live feed
-            // region_data = inputImage;
+            region_data = IcyBufferedImageUtil.convertToType(regionInputData, DataType.DOUBLE, true);
             
             if (isFirstImage)
             {
@@ -441,85 +345,65 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             
             trackGroup.getTrackSegmentList().clear();
             
-            switch (init_type.getValue())
+            if (roiInput.getValue().length == 0)
             {
-                case ROI:
-                    
-                    if (roiInput.getValue().length == 0)
-                    {
-                        ArrayList<ROI2D> roiFromSequence = inputData.getROI2Ds();
-                        
-                        if (roiFromSequence.isEmpty()) throw new EzException("Please draw or select a ROI", true);
-                        
-                        roiInput.setValue(roiFromSequence.toArray(new ROI2D[roiFromSequence.size()]));
-                    }
-                    
-                    for (ROI roi : roiInput.getValue())
-                    {
-                        if (!(roi instanceof ROI2D))
-                        {
-                            System.err.println("Warning: skipped non-2D ROI");
-                            continue;
-                        }
-                        
-                        ROI2D roi2d = (ROI2D) roi;
-                        
-                        if (roi2d instanceof ROI2DArea)
-                        {
-                            // special case: check if the area has multiple components => split them
-                            ROI2DArea area = (ROI2DArea) roi2d;
-                            IcyBufferedImage binImg = new IcyBufferedImage(inputData.getWidth(), inputData.getHeight(), 1, DataType.UBYTE);
-                            byte[] array = binImg.getDataXYAsByte(0);
-                            boolean[] mask = area.getBooleanMask(0, 0, inputData.getWidth(), inputData.getHeight());
-                            int off = 0;
-                            for (int j = 0; j < inputData.getSizeY(); j++)
-                                for (int i = 0; i < inputData.getSizeX(); i++, off++)
-                                    if (mask[off]) array[off] = (byte) 1;
-                            initFromBinaryImage(binImg, t);
-                        }
-                        else
-                        {
-                            try
-                            {
-                                final ActiveContour contour = new ActiveContour(this, contour_resolution, contour_minArea, new SlidingWindow(convergence_winSize.getValue()), roi2d);
-                                contour.setX(roi2d.getBounds2D().getCenterX());
-                                contour.setY(roi2d.getBounds2D().getCenterY());
-                                contour.setT(t);
-                                TrackSegment segment = new TrackSegment();
-                                segment.addDetection(contour);
-                                trackGroup.getTrackSegmentList().add(segment);
-                            }
-                            catch (TopologyException topo)
-                            {
-                                String message = "Warning: a contour could not be triangulated. Possible reasons:\n";
-                                message += " - binary mask is below the minimum contour area\n";
-                                message += " - the binary mask contains a hole";
-                                System.err.println(message);
-                            }
-                            catch (Exception e)
-                            {
-                                System.err.println("Unable to initialize the contour");
-                                e.printStackTrace();
-                            }
-                        }
-                    }
-                break;
+                ArrayList<ROI2D> roiFromSequence = inputData.getROI2Ds();
                 
-                case ISOVALUE:
-                    
-                    IcyBufferedImage binImg = IcyBufferedImageUtil.getCopy(inputData.getImage(t, region_z.getValue()));
-                    
-                    Thresholder.threshold(new Sequence(binImg), 0, new double[] { init_isovalue.getValue() }, true);
-                    
-                    initFromBinaryImage(binImg, t);
+                if (roiFromSequence.isEmpty()) throw new EzException("Please draw or select a ROI", true);
                 
-                break;
-                
-                default:
+                roiInput.setValue(roiFromSequence.toArray(new ROI2D[roiFromSequence.size()]));
+            }
+            
+            for (ROI roi : roiInput.getValue())
+            {
+                if (!(roi instanceof ROI2D))
                 {
-                    throw new EzException(init_type.getValue().name() + " initialization is currently not supported", true);
+                    System.err.println("Warning: skipped non-2D ROI");
+                    continue;
+                }
+                
+                ROI2D roi2d = (ROI2D) roi;
+                
+                if (roi2d instanceof ROI2DArea)
+                {
+                    // special case: check if the area has multiple components => split them
+                    ROI2DArea area = (ROI2DArea) roi2d;
+                    IcyBufferedImage binImg = new IcyBufferedImage(inputData.getWidth(), inputData.getHeight(), 1, DataType.UBYTE);
+                    byte[] array = binImg.getDataXYAsByte(0);
+                    boolean[] mask = area.getBooleanMask(0, 0, inputData.getWidth(), inputData.getHeight());
+                    int off = 0;
+                    for (int j = 0; j < inputData.getSizeY(); j++)
+                        for (int i = 0; i < inputData.getSizeX(); i++, off++)
+                            if (mask[off]) array[off] = (byte) 1;
+                    initFromBinaryImage(binImg, t);
+                }
+                else
+                {
+                    try
+                    {
+                        final ActiveContour contour = new ActiveContour(this, contour_resolution, contour_minArea, new SlidingWindow(convergence_winSize.getValue()), roi2d);
+                        contour.setX(roi2d.getBounds2D().getCenterX());
+                        contour.setY(roi2d.getBounds2D().getCenterY());
+                        contour.setT(t);
+                        TrackSegment segment = new TrackSegment();
+                        segment.addDetection(contour);
+                        trackGroup.getTrackSegmentList().add(segment);
+                    }
+                    catch (TopologyException topo)
+                    {
+                        String message = "Warning: a contour could not be triangulated. Possible reasons:\n";
+                        message += " - binary mask is below the minimum contour area\n";
+                        message += " - the binary mask contains a hole";
+                        System.err.println(message);
+                    }
+                    catch (Exception e)
+                    {
+                        System.err.println("Unable to initialize the contour");
+                        e.printStackTrace();
+                    }
                 }
             }
+            
         }
         else
         {
@@ -584,7 +468,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         
         long iter = 0;
         
-        if (region_flag.getValue()) updateRegionMeans(meanUpdaterService, allContours, t);
+        if (region_weight.getValue() > EPSILON) updateRegionMeans(meanUpdaterService, allContours, t);
         
         final HashSet<ActiveContour> evolvingContours = new HashSet<ActiveContour>(allContours.size());
         
@@ -594,7 +478,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             nbConvergedContours = 0;
             
             // update region information every 10 iterations
-            if (region_flag.getValue() && iter % 10 == 0) updateRegionMeans(meanUpdaterService, allContours, t);
+            if (region_weight.getValue() > EPSILON && iter % 10 == 0) updateRegionMeans(meanUpdaterService, allContours, t);
             
             // take a snapshot of the current list of evolving (i.e. non-converged) contours
             evolvingContours.clear();
@@ -620,11 +504,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             if (coupling_flag.getValue())
             {
                 // compute deformations issued from the energy minimization
-                computeDeformations(mainService, evolvingContours, allContours);
-                
-                // once they are all computed, apply all deformations at once
-                applyDeformations(evolvingContours, field);
-                
+                deformContours(mainService, evolvingContours, allContours, field);
             }
             else
             {
@@ -637,11 +517,11 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         }
     }
     
-    private void computeEnergy(ExecutorService service, HashSet<ActiveContour> contours)
+    public double computeEnergy(ExecutorService service, HashSet<ActiveContour> contours)
     {
         double e = 0;
         
-        if (regul_flag.getValue())
+        if (regul_weight.getValue() != 0)
         {
             for (ActiveContour contour : contours)
             {
@@ -649,7 +529,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             }
         }
         
-        if (region_flag.getValue())
+        if (region_weight.getValue() > EPSILON)
         {
             final Object _region_data = region_data.getDataXY(0);
             final double max = region_data.getChannelTypeMax(0);
@@ -686,8 +566,10 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             }
         }
         
-        // System.out.println(e);
+        return e;
     }
+    
+    byte[] _globlMask;
     
     /**
      * Deform contours independently from one another (i.e. no coupling needed)
@@ -706,16 +588,19 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             {
                 public void run()
                 {
-                    if (edge_flag.getValue()) contour.updateEdgeForces(edgeDataX, edgeDataY, edge_weight.getValue());
+                    if (regul_weight.getValue() > EPSILON) contour.updateInternalForces(regul_weight.getValue());
                     
-                    if (regul_flag.getValue()) contour.updateInternalForces(regul_weight.getValue());
+                    if (Math.abs(edge_weight.getValue()) > EPSILON) contour.updateEdgeForces(edgeDataX, edgeDataY, edge_weight.getValue());
                     
-                    if (region_flag.getValue())
-                        contour.updateRegionForces(region_data, region_weight.getValue(), region_cin.get(contour), region_cout, region_sensitivity.getValue(), region_data_max);
+                    if (region_weight.getValue() > EPSILON) contour.updateRegionForces(region_data, region_weight.getValue(), region_cin.get(contour), region_cout);
                     
-                    if (axis_flag.getValue()) contour.updateAxisForces(axis_weight.getValue());
+                    if (axis_weight.getValue() > EPSILON) contour.updateAxisForces(axis_weight.getValue());
+                    
+                    if (balloon_weight.getValue() > EPSILON) contour.updateBalloonForces(balloon_weight.getValue());
                     
                     contour.move(field, true, contour_timeStep.getValue());
+                    
+                    painter.painterChanged();
                 }
             }, contour));
         }
@@ -736,18 +621,292 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         
     }
     
-    byte[] _globlMask;
+    /**
+     * Deform contours together (coupling involved)
+     * 
+     * @param service
+     * @param evolvingContours
+     * @param allContours
+     */
+    private void deformContours(ExecutorService service, final HashSet<ActiveContour> evolvingContours, final HashSet<ActiveContour> allContours, Rectangle field)
+    {
+        if (evolvingContours.size() == 1)
+        {
+            // no multi-threading needed
+            
+            ActiveContour contour = evolvingContours.iterator().next();
+            
+            if (Math.abs(edge_weight.getValue()) > EPSILON) contour.updateEdgeForces(edgeDataX, edgeDataY, edge_weight.getValue());
+            
+            if (regul_weight.getValue() > EPSILON) contour.updateInternalForces(regul_weight.getValue());
+            
+            if (region_weight.getValue() > EPSILON) contour.updateRegionForces(region_data, region_weight.getValue(), region_cin.get(contour), region_cout);
+            
+            if (axis_weight.getValue() > EPSILON) contour.updateAxisForces(axis_weight.getValue());
+            
+            if (balloon_weight.getValue() > EPSILON) contour.updateBalloonForces(balloon_weight.getValue());
+            
+            if (coupling_flag.getValue())
+            {
+                // warning: feedback must be computed against ALL contours
+                // (including those which have already converged)
+                for (ActiveContour otherContour : allContours)
+                {
+                    if (otherContour == null || otherContour == contour) continue;
+                    
+                    contour.updateFeedbackForces(otherContour);
+                }
+            }
+        }
+        else
+        {
+            ArrayList<Future<ActiveContour>> tasks = new ArrayList<Future<ActiveContour>>(evolvingContours.size());
+            
+            for (final ActiveContour contour : evolvingContours)
+            {
+                tasks.add(service.submit(new Runnable()
+                {
+                    public void run()
+                    {
+                        if (regul_weight.getValue() > EPSILON) contour.updateInternalForces(regul_weight.getValue());
+                        
+                        if (Math.abs(edge_weight.getValue()) > EPSILON) contour.updateEdgeForces(edgeDataX, edgeDataY, edge_weight.getValue());
+                        
+                        if (region_weight.getValue() > EPSILON) contour.updateRegionForces(region_data, region_weight.getValue(), region_cin.get(contour), region_cout);
+                        
+                        if (axis_weight.getValue() > EPSILON) contour.updateAxisForces(axis_weight.getValue());
+                        
+                        if (balloon_weight.getValue() > EPSILON) contour.updateBalloonForces(balloon_weight.getValue());
+                        
+                        if (coupling_flag.getValue())
+                        {
+                            // warning: feedback must be computed against ALL contours
+                            // (including those which have already converged)
+                            for (ActiveContour otherContour : allContours)
+                            {
+                                if (otherContour == null || otherContour == contour) continue;
+                                
+                                contour.updateFeedbackForces(otherContour);
+                            }
+                        }
+                    }
+                }, contour));
+            }
+            
+            for (Future<?> future : tasks)
+                try
+                {
+                    future.get();
+                }
+                catch (Exception e1)
+                {
+                    e1.printStackTrace();
+                }
+        }
+        
+        for (ActiveContour contour : evolvingContours)
+            contour.move(field, true, contour_timeStep.getValue());
+        
+        painter.painterChanged();
+    }
+    
+    private void resampleContours(ExecutorService service, final ExecutorService meanUpdaterService, final HashSet<ActiveContour> evolvingContours, final HashSet<ActiveContour> allContours,
+            final int t)
+    {
+        if (evolvingContours.size() == 1)
+        {
+            // no multi-threading needed
+            
+            ActiveContour contour = evolvingContours.iterator().next();
+            
+            try
+            {
+                contour.reSample(0.8, 1.4);
+            }
+            catch (TopologyException e)
+            {
+                allContours.remove(contour);
+                evolvingContours.remove(contour);
+                
+                TrackSegment motherSegment = null;
+                
+                ArrayList<TrackSegment> segments = trackGroup.getTrackSegmentList();
+                for (int i = 0; i < segments.size(); i++)
+                {
+                    TrackSegment segment = segments.get(i);
+                    
+                    if (segment.containsDetection(contour))
+                    {
+                        segment.removeDetection(contour);
+                        
+                        if (segment.getDetectionList().size() == 0)
+                        {
+                            segments.remove(i--);
+                        }
+                        else
+                        {
+                            motherSegment = segment;
+                        }
+                        break;
+                    }
+                }
+                
+                for (ActiveContour child : e.children)
+                {
+                    try
+                    {
+                        child.reSample(0.8, 1.4);
+                        allContours.add(child);
+                        evolvingContours.add(child);
+                        TrackSegment childSegment = new TrackSegment();
+                        childSegment.addDetection(child);
+                        trackGroup.addTrackSegment(childSegment);
+                        if (motherSegment != null && motherSegment.getDetectionList().size() > 0) trackPool.createLink(motherSegment, childSegment);
+                    }
+                    catch (TopologyException tpE)
+                    {
+                        // do nothing (the child will just not be added)
+                    }
+                }
+                
+                if (region_weight.getValue() > EPSILON) updateRegionMeans(meanUpdaterService, allContours, t);
+            }
+            catch (NullPointerException npe)
+            {
+                allContours.remove(contour);
+                evolvingContours.remove(contour);
+                
+                ArrayList<TrackSegment> segments = trackGroup.getTrackSegmentList();
+                for (int i = 0; i < segments.size(); i++)
+                {
+                    TrackSegment segment = segments.get(i);
+                    
+                    if (segment.containsDetection(contour))
+                    {
+                        segment.removeDetection(contour);
+                        
+                        if (segment.getDetectionList().size() == 0)
+                        {
+                            segments.remove(i--);
+                        }
+                        
+                        break;
+                    }
+                }
+                
+                if (region_weight.getValue() > EPSILON) updateRegionMeans(meanUpdaterService, allContours, t);
+            }
+        }
+        else
+        {
+            ArrayList<Future<ActiveContour>> tasks = new ArrayList<Future<ActiveContour>>(evolvingContours.size());
+            
+            for (final ActiveContour contour : evolvingContours)
+            {
+                tasks.add(service.submit(new Callable<ActiveContour>()
+                {
+                    public ActiveContour call()
+                    {
+                        try
+                        {
+                            contour.reSample(0.8, 1.4);
+                        }
+                        catch (TopologyException e)
+                        {
+                            allContours.remove(contour);
+                            evolvingContours.remove(contour);
+                            
+                            TrackSegment motherSegment = null;
+                            
+                            ArrayList<TrackSegment> segments = trackGroup.getTrackSegmentList();
+                            for (int i = 0; i < segments.size(); i++)
+                            {
+                                TrackSegment segment = segments.get(i);
+                                
+                                if (segment.containsDetection(contour))
+                                {
+                                    segment.removeDetection(contour);
+                                    
+                                    if (segment.getDetectionList().size() == 0)
+                                    {
+                                        segments.remove(i--);
+                                    }
+                                    else
+                                    {
+                                        motherSegment = segment;
+                                    }
+                                    break;
+                                }
+                            }
+                            
+                            for (ActiveContour child : e.children)
+                            {
+                                try
+                                {
+                                    child.reSample(0.8, 1.4);
+                                    allContours.add(child);
+                                    evolvingContours.add(child);
+                                    TrackSegment childSegment = new TrackSegment();
+                                    childSegment.addDetection(child);
+                                    trackGroup.addTrackSegment(childSegment);
+                                    if (motherSegment != null && motherSegment.getDetectionList().size() > 0) trackPool.createLink(motherSegment, childSegment);
+                                }
+                                catch (TopologyException tpE)
+                                {
+                                    // do nothing (the child will just not be added)
+                                }
+                            }
+                            
+                            if (region_weight.getValue() > EPSILON) updateRegionMeans(meanUpdaterService, allContours, t);
+                        }
+                        catch (NullPointerException npe)
+                        {
+                            allContours.remove(contour);
+                            evolvingContours.remove(contour);
+                            
+                            ArrayList<TrackSegment> segments = trackGroup.getTrackSegmentList();
+                            for (int i = 0; i < segments.size(); i++)
+                            {
+                                TrackSegment segment = segments.get(i);
+                                
+                                if (segment.containsDetection(contour))
+                                {
+                                    segment.removeDetection(contour);
+                                    
+                                    if (segment.getDetectionList().size() == 0)
+                                    {
+                                        segments.remove(i--);
+                                    }
+                                    
+                                    break;
+                                }
+                            }
+                            
+                            if (region_weight.getValue() > EPSILON) updateRegionMeans(meanUpdaterService, allContours, t);
+                        }
+                        
+                        return contour;
+                    }
+                }));
+            }
+            
+            for (Future<ActiveContour> f : tasks)
+                try
+                {
+                    f.get();
+                }
+                catch (Exception e)
+                {
+                    e.printStackTrace();
+                }
+        }
+    }
     
     private void updateRegionMeans(ExecutorService service, Collection<ActiveContour> contours, int t)
     {
         ArrayList<Future<?>> tasks = new ArrayList<Future<?>>(contours.size());
         
         final double[] _region_data = region_data.getDataXYAsDouble(0);
-        // uncomment for live feed:
-        // _region_data = region_data.getDataXY(0);
-        // region_data_max = region_data.getChannelTypeMax(0);
-        // region_data_type = region_data.getDataType_();
-        
         _globlMask = region_globl_mask.getDataXYAsByte(0);
         Arrays.fill(_globlMask, (byte) 0);
         
@@ -770,10 +929,6 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                         if (_localMask[i] != 0)
                         {
                             inSum += _region_data[i];
-                            
-                            // uncomment for live feed
-                            // inSum += Array1DUtil.getValue(_region_data, i, region_data_type) /
-                            // region_data_max;
                             inCpt++;
                         }
                     }
@@ -813,343 +968,9 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         region_cout = outSum / outCpt;
     }
     
-    private void resampleContours(ExecutorService service, final ExecutorService meanUpdaterService, final HashSet<ActiveContour> evolvingContours, final HashSet<ActiveContour> allContours,
-            final int t)
-    {
-        if (evolvingContours.size() == 1)
-        {
-            // no multi-threading needed
-            
-            ActiveContour contour = evolvingContours.iterator().next();
-            
-            try
-            {
-                contour.reSample(0.7, 1.4);
-            }
-            catch (TopologyException e)
-            {
-                allContours.remove(contour);
-                evolvingContours.remove(contour);
-                
-                TrackSegment motherSegment = null;
-                
-                ArrayList<TrackSegment> segments = trackGroup.getTrackSegmentList();
-                for (int i = 0; i < segments.size(); i++)
-                {
-                    TrackSegment segment = segments.get(i);
-                    
-                    if (segment.containsDetection(contour))
-                    {
-                        segment.removeDetection(contour);
-                        
-                        if (segment.getDetectionList().size() == 0)
-                        {
-                            segments.remove(i--);
-                        }
-                        else
-                        {
-                            motherSegment = segment;
-                        }
-                        break;
-                    }
-                }
-                
-                for (ActiveContour child : e.children)
-                {
-                    try
-                    {
-                        child.reSample(0.7, 1.4);
-                        allContours.add(child);
-                        evolvingContours.add(child);
-                        TrackSegment childSegment = new TrackSegment();
-                        childSegment.addDetection(child);
-                        trackGroup.addTrackSegment(childSegment);
-                        if (motherSegment != null && motherSegment.getDetectionList().size() > 0) trackPool.createLink(motherSegment, childSegment);
-                    }
-                    catch (TopologyException tpE)
-                    {
-                        // do nothing (the child will just not be added)
-                    }
-                }
-                
-                if (region_flag.getValue()) updateRegionMeans(meanUpdaterService, allContours, t);
-            }
-            catch (NullPointerException npe)
-            {
-                allContours.remove(contour);
-                evolvingContours.remove(contour);
-                
-                ArrayList<TrackSegment> segments = trackGroup.getTrackSegmentList();
-                for (int i = 0; i < segments.size(); i++)
-                {
-                    TrackSegment segment = segments.get(i);
-                    
-                    if (segment.containsDetection(contour))
-                    {
-                        segment.removeDetection(contour);
-                        
-                        if (segment.getDetectionList().size() == 0)
-                        {
-                            segments.remove(i--);
-                        }
-                        
-                        break;
-                    }
-                }
-                
-                if (region_flag.getValue()) updateRegionMeans(meanUpdaterService, allContours, t);
-            }
-        }
-        else
-        {
-            ArrayList<Future<ActiveContour>> tasks = new ArrayList<Future<ActiveContour>>(evolvingContours.size());
-            
-            for (final ActiveContour contour : evolvingContours)
-            {
-                tasks.add(service.submit(new Callable<ActiveContour>()
-                {
-                    public ActiveContour call()
-                    {
-                        try
-                        {
-                            contour.reSample(0.7, 1.4);
-                        }
-                        catch (TopologyException e)
-                        {
-                            allContours.remove(contour);
-                            evolvingContours.remove(contour);
-                            
-                            TrackSegment motherSegment = null;
-                            
-                            ArrayList<TrackSegment> segments = trackGroup.getTrackSegmentList();
-                            for (int i = 0; i < segments.size(); i++)
-                            {
-                                TrackSegment segment = segments.get(i);
-                                
-                                if (segment.containsDetection(contour))
-                                {
-                                    segment.removeDetection(contour);
-                                    
-                                    if (segment.getDetectionList().size() == 0)
-                                    {
-                                        segments.remove(i--);
-                                    }
-                                    else
-                                    {
-                                        motherSegment = segment;
-                                    }
-                                    break;
-                                }
-                            }
-                            
-                            for (ActiveContour child : e.children)
-                            {
-                                try
-                                {
-                                    child.reSample(0.7, 1.4);
-                                    allContours.add(child);
-                                    evolvingContours.add(child);
-                                    TrackSegment childSegment = new TrackSegment();
-                                    childSegment.addDetection(child);
-                                    trackGroup.addTrackSegment(childSegment);
-                                    if (motherSegment != null && motherSegment.getDetectionList().size() > 0) trackPool.createLink(motherSegment, childSegment);
-                                }
-                                catch (TopologyException tpE)
-                                {
-                                    // do nothing (the child will just not be added)
-                                }
-                            }
-                            
-                            if (region_flag.getValue()) updateRegionMeans(meanUpdaterService, allContours, t);
-                        }
-                        catch (NullPointerException npe)
-                        {
-                            allContours.remove(contour);
-                            evolvingContours.remove(contour);
-                            
-                            ArrayList<TrackSegment> segments = trackGroup.getTrackSegmentList();
-                            for (int i = 0; i < segments.size(); i++)
-                            {
-                                TrackSegment segment = segments.get(i);
-                                
-                                if (segment.containsDetection(contour))
-                                {
-                                    segment.removeDetection(contour);
-                                    
-                                    if (segment.getDetectionList().size() == 0)
-                                    {
-                                        segments.remove(i--);
-                                    }
-                                    
-                                    break;
-                                }
-                            }
-                            
-                            if (region_flag.getValue()) updateRegionMeans(meanUpdaterService, allContours, t);
-                        }
-                        
-                        return contour;
-                    }
-                }));
-            }
-            
-            for (Future<ActiveContour> f : tasks)
-                try
-                {
-                    f.get();
-                }
-                catch (Exception e)
-                {
-                    e.printStackTrace();
-                }
-        }
-    }
-    
-    /**
-     * Deform contours together (coupling involved)
-     * 
-     * @param service
-     * @param evolvingContours
-     * @param allContours
-     */
-    private void computeDeformations(ExecutorService service, final HashSet<ActiveContour> evolvingContours, final HashSet<ActiveContour> allContours)
-    {
-        if (evolvingContours.size() == 1)
-        {
-            // no multi-threading needed
-            
-            ActiveContour contour = evolvingContours.iterator().next();
-            
-            if (edge_flag.getValue()) contour.updateEdgeForces(edgeDataX, edgeDataY, edge_weight.getValue());
-            
-            if (regul_flag.getValue()) contour.updateInternalForces(regul_weight.getValue());
-            
-            if (region_flag.getValue()) contour.updateRegionForces(region_data, region_weight.getValue(), region_cin.get(contour), region_cout, region_sensitivity.getValue(), region_data_max);
-            
-            if (axis_flag.getValue()) contour.updateAxisForces(axis_weight.getValue());
-            
-            if (coupling_flag.getValue())
-            {
-                // warning: feedback must be computed against ALL contours
-                // (including those which have already converged)
-                for (ActiveContour otherContour : allContours)
-                {
-                    if (otherContour == null || otherContour == contour) continue;
-                    
-                    contour.updateFeedbackForces(otherContour);
-                }
-            }
-        }
-        else
-        {
-            ArrayList<Future<ActiveContour>> tasks = new ArrayList<Future<ActiveContour>>(evolvingContours.size());
-            
-            for (final ActiveContour contour : evolvingContours)
-            {
-                tasks.add(service.submit(new Runnable()
-                {
-                    public void run()
-                    {
-                        if (edge_flag.getValue()) contour.updateEdgeForces(edgeDataX, edgeDataY, edge_weight.getValue());
-                        
-                        if (regul_flag.getValue()) contour.updateInternalForces(regul_weight.getValue());
-                        
-                        if (region_flag.getValue())
-                            contour.updateRegionForces(region_data, region_weight.getValue(), region_cin.get(contour), region_cout, region_sensitivity.getValue(), region_data_max);
-                        
-                        if (axis_flag.getValue()) contour.updateAxisForces(axis_weight.getValue());
-                        
-                        contour.updateBalloonForces(input.getValue().getFirstImage(), 0.01);
-                        
-                        if (coupling_flag.getValue())
-                        {
-                            // warning: feedback must be computed against ALL contours
-                            // (including those which have already converged)
-                            for (ActiveContour otherContour : allContours)
-                            {
-                                if (otherContour == null || otherContour == contour) continue;
-                                
-                                contour.updateFeedbackForces(otherContour);
-                            }
-                        }
-                    }
-                }, contour));
-            }
-            
-            for (Future<?> future : tasks)
-                try
-                {
-                    future.get();
-                }
-                catch (Exception e1)
-                {
-                    e1.printStackTrace();
-                }
-        }
-        
-        // ArrayList<Callable<ActiveContour>> tasks = new
-        // ArrayList<Callable<ActiveContour>>(evolvingContours.size());
-        //
-        // for (final ActiveContour contour : evolvingContours)
-        // {
-        // tasks.add(new Callable<ActiveContour>()
-        // {
-        // public ActiveContour call()
-        // {
-        // if (edge_flag.getValue()) contour.updateEdgeForces(edgeDataX, edgeDataY,
-        // edge_weight.getValue());
-        //
-        // if (regul_flag.getValue()) contour.updateInternalForces(regul_weight.getValue());
-        //
-        // if (region_flag.getValue()) contour.updateRegionForces(region_data,
-        // region_weight.getValue(), region_cin.get(contour), region_cout,
-        // region_sensitivity.getValue());
-        //
-        // if (axis_flag.getValue()) contour.updateAxisForces(axis_weight.getValue());
-        //
-        // if (coupling_flag.getValue())
-        // {
-        // // warning: feedback must be computed against ALL contours
-        // // (including those which have already converged)
-        // for (ActiveContour otherContour : allContours)
-        // {
-        // if (otherContour == null || otherContour == contour) continue;
-        //
-        // contour.updateFeedbackForces(otherContour);
-        // }
-        // }
-        //
-        // return contour;
-        // }
-        // });
-        // }
-        //
-        // try
-        // {
-        // service.invokeAll(tasks);
-        // }
-        // catch (InterruptedException e)
-        // {
-        // e.printStackTrace();
-        // }
-    }
-    
-    private void applyDeformations(HashSet<ActiveContour> contours, Rectangle field)
-    {
-        for (ActiveContour contour : contours)
-            contour.move(field, true, contour_timeStep.getValue());
-    }
-    
-    private void storeResult(Sequence labels, int t)
+    private void storeResult(int t)
     {
         ArrayList<TrackSegment> segments = trackGroup.getTrackSegmentList();
-        
-        IcyBufferedImage labelsIMG = null;
-        if (labels != null)
-        {
-            labelsIMG = new IcyBufferedImage(inputData.getWidth(), inputData.getHeight(), 1, DataType.UBYTE);
-            labels.setImage(t, 0, labelsIMG);
-        }
         
         ArrayList<ROI> rois = null;
         if (output_rois.getValue()) rois = new ArrayList<ROI>(Arrays.asList(roiOutput.getValue()));
@@ -1179,14 +1000,6 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 area.setName("[T=" + StringUtil.toString(t, 1 + (int) Math.round(Math.log10(inputData.getSizeT()))) + "] Object #" + i);
                 rois.add(area);
             }
-            
-            // output as labels
-            if (labels != null)
-            {
-                Graphics2D g = labelsIMG.createGraphics();
-                g.setColor(new Color(i));
-                g.fill(contour.path);
-            }
         }
         
         if (output_rois.getValue() && rois.size() > 0) roiOutput.setValue(rois.toArray(new ROI2D[rois.size()]));
@@ -1200,7 +1013,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         // contoursMap.clear();
         // contours.clear();
         // trackGroup.clearTracks();
-        if (region_flag.getValue()) region_cin.clear();
+        if (region_weight.getValue() > EPSILON) region_cin.clear();
     }
     
     @Override
@@ -1213,27 +1026,17 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     public void declareInput(VarList inputMap)
     {
         inputMap.add("input sequence", input.getVariable());
-        init_type.setValue(Initialization.ROI);
         inputMap.add("Input ROI", roiInput);
-        regul_flag.setValue(true);
         inputMap.add("regularization: weight", regul_weight.getVariable());
-        edge_flag.setValue(true);
         inputMap.add("edge: weight", edge_weight.getVariable());
-        edge_input.getVariable().setReference(input.getVariable());
-        edge_c.setValue(0);
-        edge_z.setValue(0);
-        region_flag.setValue(true);
+        inputMap.add("edge: channel", edge_c.getVariable());
         inputMap.add("region: weight", region_weight.getVariable());
-//        inputMap.add("region: sensitivity", region_sensitivity.getVariable());
-        region_input.getVariable().setReference(input.getVariable());
-        region_c.setValue(0);
-        region_z.setValue(0);
+        inputMap.add("region: channel", region_c.getVariable());
         coupling_flag.setValue(true);
         inputMap.add("contour resolution", contour_resolution.getVariable());
         inputMap.add("minimum object size", contour_minArea.getVariable());
-        inputMap.add("convergence window size", convergence_winSize.getVariable());
+        //inputMap.add("convergence window size", convergence_winSize.getVariable());
         output_rois.setValue(true);
-        output_labels.setValue(false);
     }
     
     @Override
