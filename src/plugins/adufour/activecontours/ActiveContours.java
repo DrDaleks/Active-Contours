@@ -486,7 +486,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             {
                 Double criterion = contour.convergence.computeCriterion(convergence_operation.getValue());
                 
-                if (criterion != null && criterion < convergence_criterion.getValue())
+                if (criterion != null && criterion < convergence_criterion.getValue() / 10)
                 {
                     nbConvergedContours++;
                     if (getUI() != null) getUI().setProgressBarValue((double) nbConvergedContours / allContours.size());
