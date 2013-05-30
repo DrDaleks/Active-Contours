@@ -10,7 +10,6 @@ import icy.roi.ROI2DRectangle;
 import icy.roi.ROI2DShape;
 import icy.sequence.Sequence;
 import icy.type.DataType;
-import icy.type.collection.array.Array1DUtil;
 
 import java.awt.BasicStroke;
 import java.awt.Color;
@@ -420,7 +419,6 @@ public class ActiveContour extends Detection
         {
             // draw the path using lines (for now)
             path.lineTo(p.x, p.y);
-            // TODO use quad curves for more elegance
         }
     }
     
@@ -520,38 +518,32 @@ public class ActiveContour extends Detection
         final int nbPoints = n;
         if (modelForces == null || modelForces.length != nbPoints)
         {
-            //Path2D.Double path = new Path2D.Double();
-            
-            synchronized (path)
-            {
-                
             modelForces = new Vector3d[nbPoints];
             contourNormals = new Vector3d[nbPoints];
             feedbackForces = new Vector3d[nbPoints];
-            
-            path.reset();
             
             for (int i = 0; i < nbPoints; i++)
             {
                 modelForces[i] = new Vector3d();
                 contourNormals[i] = new Vector3d();
                 feedbackForces[i] = new Vector3d();
-                Point3d p = points.get(i);
-                
-                if (i == 0)
-                {
-                    path.moveTo(p.x, p.y);
-                }
-                else
-                {
-                    path.lineTo(p.x, p.y);
-                }
+            }
+        }
+        
+        synchronized (path)
+        {
+            path.reset();
+            
+            Point3d p = points.get(0);
+            path.moveTo(p.x, p.y);
+            
+            for (int i = 1; i < nbPoints; i++)
+            {
+                p = points.get(i);
+                path.lineTo(p.x, p.y);
             }
             
             path.closePath();
-            
-            }
-//            this.path = path;
         }
         
         normalsNeedUpdate = true;
@@ -710,6 +702,7 @@ public class ActiveContour extends Detection
                     force.scale(timeStep);
                     
                     double disp = force.length();
+                    
                     if (disp > maxDisp) force.scale(maxDisp / disp);
                     
                     p.add(force);
@@ -952,8 +945,8 @@ public class ActiveContour extends Detection
                 f.x += sum * norm.x;
                 f.y += sum * norm.y;
             }
-            
         }
+        
     }
     
     /**
@@ -981,10 +974,7 @@ public class ActiveContour extends Detection
         
         final int offset = i + j * width;
         final int offset_plus_1 = offset + 1; // saves 1 addition
-        // double[] data = image.getDataXYAsDouble(0);
-        Object data = image.getDataXY(0);
-        double max = image.getChannelTypeMax(0);
-        DataType type = image.getDataType_();
+        double[] data = image.getDataXYAsDouble(0);
         
         x -= i;
         y -= j;
@@ -992,12 +982,10 @@ public class ActiveContour extends Detection
         final double mx = 1 - x;
         final double my = 1 - y;
         
-        value += mx * my * Array1DUtil.getValue(data, offset, type) / max;// data[offset];
-        value += x * my * Array1DUtil.getValue(data, offset_plus_1, type) / max;// data[offset_plus_1];
-        value += mx * y * Array1DUtil.getValue(data, offset + width, type) / max;// data[offset +
-                                                                                 // width];
-        value += x * y * Array1DUtil.getValue(data, offset_plus_1 + width, type) / max;// data[offset_plus_1
-                                                                                       // + width];
+        value += mx * my * data[offset];
+        value += x * my * data[offset_plus_1];
+        value += mx * y * data[offset + width];
+        value += x * y * data[offset_plus_1 + width];
         
         return value;
     }
@@ -1181,31 +1169,31 @@ public class ActiveContour extends Detection
         switch (order)
         {
         
-            case 0: // number of points
+        case 0: // number of points
+        {
+            return points.size();
+        }
+        
+        case 1: // perimeter
+        {
+            Point3d p1;
+            Point3d p2;
+            double l = 0.0;
+            int size = points.size();
+            for (int i = 0; i < size; i++)
             {
-                return points.size();
+                p1 = points.get(i);
+                p2 = points.get((i + 1) % size);
+                l += Math.abs(p1.distance(p2));
             }
-            
-            case 1: // perimeter
-            {
-                Point3d p1;
-                Point3d p2;
-                double l = 0.0;
-                int size = points.size();
-                for (int i = 0; i < size; i++)
-                {
-                    p1 = points.get(i);
-                    p2 = points.get((i + 1) % size);
-                    l += Math.abs(p1.distance(p2));
-                }
-                return l;
-            }
-            case 2: // area
-            {
-                return Math.abs(getAlgebraicArea());
-            }
-            default:
-                throw new UnsupportedOperationException("Dimension " + order + " not implemented");
+            return l;
+        }
+        case 2: // area
+        {
+            return Math.abs(getAlgebraicArea());
+        }
+        default:
+            throw new UnsupportedOperationException("Dimension " + order + " not implemented");
         }
     }
     
