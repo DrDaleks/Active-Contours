@@ -905,11 +905,11 @@ public class ActiveContour extends Detection
      * @param sensitivity
      *            set 1 for default, lower than 1 for high SNRs and vice-versa
      */
-    void updateRegionForces(IcyBufferedImage region_data, double weight, double cin, double cout)
+    void updateRegionForces(IcyBufferedImage region_data, double weight, double cin, double sin, double cout, double sout)
     {
-        double dataMax = region_data.getChannelMax(0);
-        
-        double sensitivity = (1 / Math.max(cout * 2, cin));
+        // uncomment these 2 lines for mean-based information
+//        double dataMax = region_data.getChannelMax(0);
+//        double sensitivity = 1 / Math.max(cout * 2, cin);
         
         updateNormalsIfNeeded();
         
@@ -928,12 +928,14 @@ public class ActiveContour extends Detection
             
             // bounds check
             if (p.x < 1 || p.y < 1 || p.x >= w - 1 || p.y >= h - 1) continue;
-            
-            val = getPixelValue(region_data, p.x, p.y) / dataMax;
+
+            // invert the following lines for mean-based information
+//            val = getPixelValue(region_data, p.x, p.y); / dataMax;
+            val = getPixelValue(region_data, p.x, p.y);
             inDiff = val - cin;
             outDiff = val - cout;
-            sensitivity = (1 / Math.max(cout * 2, cin));
-            sum = weight * contour_resolution.getValue() * (sensitivity * (outDiff * outDiff) - (inDiff * inDiff));
+//             sum = weight * contour_resolution.getValue() * (sensitivity * (outDiff * outDiff) - (inDiff * inDiff));
+            sum = weight * (Math.log(sout) - Math.log(sin) + (outDiff * outDiff) / (2 * sout * sout) - (inDiff * inDiff) / (2 * sin * sin));
             
             if (counterClockWise)
             {
@@ -1169,31 +1171,31 @@ public class ActiveContour extends Detection
         switch (order)
         {
         
-        case 0: // number of points
-        {
-            return points.size();
-        }
-        
-        case 1: // perimeter
-        {
-            Point3d p1;
-            Point3d p2;
-            double l = 0.0;
-            int size = points.size();
-            for (int i = 0; i < size; i++)
+            case 0: // number of points
             {
-                p1 = points.get(i);
-                p2 = points.get((i + 1) % size);
-                l += Math.abs(p1.distance(p2));
+                return points.size();
             }
-            return l;
-        }
-        case 2: // area
-        {
-            return Math.abs(getAlgebraicArea());
-        }
-        default:
-            throw new UnsupportedOperationException("Dimension " + order + " not implemented");
+            
+            case 1: // perimeter
+            {
+                Point3d p1;
+                Point3d p2;
+                double l = 0.0;
+                int size = points.size();
+                for (int i = 0; i < size; i++)
+                {
+                    p1 = points.get(i);
+                    p2 = points.get((i + 1) % size);
+                    l += Math.abs(p1.distance(p2));
+                }
+                return l;
+            }
+            case 2: // area
+            {
+                return Math.abs(getAlgebraicArea());
+            }
+            default:
+                throw new UnsupportedOperationException("Dimension " + order + " not implemented");
         }
     }
     
