@@ -140,7 +140,7 @@ public class ActiveContour extends Detection
         counterClockWise = (getAlgebraicArea() > 0);
     }
     
-    public ActiveContour(ActiveContours owner, EzVarDouble contour_resolution, EzVarInteger contour_minArea, SlidingWindow convergenceWindow, ROI2D roi) throws TopologyException
+    public ActiveContour(ActiveContours owner, EzVarDouble contour_resolution, EzVarInteger contour_minArea, SlidingWindow convergenceWindow, ROI2D roi)
     {
         this(owner, contour_resolution, contour_minArea, convergenceWindow);
         
@@ -149,13 +149,40 @@ public class ActiveContour extends Detection
             throw new EzException("Wrong ROI type. Only Rectangle, Ellipse, Polygon and Area are supported", true);
         }
         
+        boolean contourOK = false;
+        double area = 0;
+        
         if (roi instanceof ROI2DArea)
         {
-            // fill holes if any
-            new HoleFiller().fillHoles2D((ROI2DArea) roi);
-            triangulate((ROI2DArea) roi, contour_resolution.getValue());
+            try
+            {
+                triangulate((ROI2DArea) roi, contour_resolution.getValue());
+            }
+            catch (TopologyException e)
+            {
+                roi = new ROI2DRectangle(roi.getBounds2D());
+            }
+            
+            if (points.size() == 0)
+            {
+                // replace by ellipse
+                roi = new ROI2DEllipse(roi.getBounds2D());
+            }
+            else
+            {
+                area = getAlgebraicArea();
+                if (Math.abs(area) < contour_minArea.getValue())
+                {
+                    roi = new ROI2DEllipse(roi.getBounds2D());
+                }
+                else
+                {
+                    contourOK = true;
+                }
+            }
         }
-        else
+        
+        if (!contourOK)
         {
             // convert the ROI into a linked list of points
             
@@ -180,12 +207,9 @@ public class ActiveContour extends Detection
             }
             // in any case, don't forget to close the path
             path.closePath();
+            
+            area = getAlgebraicArea();
         }
-        
-        if (points.size() == 0) throw new TopologyException(this, null);
-        
-        double area = getAlgebraicArea();
-        if (Math.abs(area) < contour_minArea.getValue()) throw new TopologyException(this, null);
         
         counterClockWise = (area > 0);
     }
@@ -359,7 +383,7 @@ public class ActiveContour extends Detection
             current_resolution_doubled *= 2;
         }
         
-        reSample(0.7, 1.4);
+        reSample(0.8, 1.4);
     }
     
     private static void createEdge(ArrayList<Segment> segments, double xStart, double yStart, double xEnd, double yEnd)
@@ -683,36 +707,32 @@ public class ActiveContour extends Detection
         }
     }
     
-    void move(Rectangle field, boolean boundToField, double timeStep)
+    void move(ROI2D field, boolean boundToField, double timeStep)
     {
-        Vector3d force;
+        Vector3d force = new Vector3d();
         double maxDisp = contour_resolution.getValue() * timeStep;
         
-        int index = 0;
-        
-        for (Point3d p : points)
+        int n = points.size();
+        for (int index = 0; index < n; index++)
         {
+            Point3d p = points.get(index);
             try
             {
-                if (boundToField && field.contains(p.x, p.y))
-                {
-                    force = modelForces[index];
-                    force.add(feedbackForces[index]);
-                    
-                    force.scale(timeStep);
-                    
-                    double disp = force.length();
-                    
-                    if (disp > maxDisp) force.scale(maxDisp / disp);
-                    
-                    p.add(force);
-                    force.set(0, 0, 0);
-                }
+                if (boundToField && field.contains(p.x, p.y)) force.set(modelForces[index]);
+                
+                force.add(feedbackForces[index]);
+                
+                force.scale(timeStep);
+                
+                double disp = force.length();
+                
+                if (disp > maxDisp) force.scale(maxDisp / disp);
+                
+                p.add(force);
+                force.set(0, 0, 0);
                 
                 modelForces[index].set(0, 0, 0);
                 feedbackForces[index].set(0, 0, 0);
-                
-                index++;
             }
             catch (NullPointerException e)
             {
@@ -724,7 +744,7 @@ public class ActiveContour extends Detection
         
         if (convergence == null) return;
         
-        double value = getDimension(1);
+        double value = getDimension(2);
         convergence.add(value);
     }
     
@@ -800,7 +820,7 @@ public class ActiveContour extends Detection
      * 
      * @param weight
      */
-    void updateAxisForces(double weight)
+    void computeAxisForces(double weight)
     {
         Vector3d axis = new Vector3d();
         int s = (int) getDimension(0);
@@ -853,7 +873,7 @@ public class ActiveContour extends Detection
         }
     }
     
-    void updateBalloonForces(double weight)
+    void computeBalloonForces(double weight)
     {
         int n = points.size();
         updateNormalsIfNeeded();
@@ -873,7 +893,7 @@ public class ActiveContour extends Detection
      * @param weight
      * @param edge_data
      */
-    void updateEdgeForces(IcyBufferedImage edgeDataX, IcyBufferedImage edgeDataY, double weight)
+    void computeEdgeForces(IcyBufferedImage edgeDataX, IcyBufferedImage edgeDataY, double weight)
     {
         int n = points.size();
         updateNormalsIfNeeded();
@@ -905,11 +925,11 @@ public class ActiveContour extends Detection
      * @param sensitivity
      *            set 1 for default, lower than 1 for high SNRs and vice-versa
      */
-    void updateRegionForces(IcyBufferedImage region_data, double weight, double cin, double sin, double cout, double sout)
+    void computeRegionForces(IcyBufferedImage region_data, double weight, double cin, double sin, double cout, double sout)
     {
         // uncomment these 2 lines for mean-based information
-//        double dataMax = region_data.getChannelMax(0);
-//        double sensitivity = 1 / Math.max(cout * 2, cin);
+        double dataMax = region_data.getChannelMax(0);
+        double sensitivity = 1 / Math.max(cout * 2, cin);
         
         updateNormalsIfNeeded();
         
@@ -928,14 +948,15 @@ public class ActiveContour extends Detection
             
             // bounds check
             if (p.x < 1 || p.y < 1 || p.x >= w - 1 || p.y >= h - 1) continue;
-
+            
             // invert the following lines for mean-based information
-//            val = getPixelValue(region_data, p.x, p.y); / dataMax;
-            val = getPixelValue(region_data, p.x, p.y);
+            val = getPixelValue(region_data, p.x, p.y) / dataMax;
+            // val = getPixelValue(region_data, p.x, p.y);
             inDiff = val - cin;
             outDiff = val - cout;
-//             sum = weight * contour_resolution.getValue() * (sensitivity * (outDiff * outDiff) - (inDiff * inDiff));
-            sum = weight * (Math.log(sout) - Math.log(sin) + (outDiff * outDiff) / (2 * sout * sout) - (inDiff * inDiff) / (2 * sin * sin));
+            sum = weight * contour_resolution.getValue() * (sensitivity * (outDiff * outDiff) - (inDiff * inDiff));
+            // sum = weight * (Math.log(sout) - Math.log(sin) + (outDiff * outDiff) / (2 * sout *
+            // sout) - (inDiff * inDiff) / (2 * sin * sin));
             
             if (counterClockWise)
             {
@@ -992,7 +1013,7 @@ public class ActiveContour extends Detection
         return value;
     }
     
-    void updateInternalForces(double weight)
+    void computeInternalForces(double weight)
     {
         int n = points.size();
         
@@ -1006,14 +1027,14 @@ public class ActiveContour extends Detection
         curr = points.get(0);
         next = points.get(1);
         
-        f = modelForces[0];
+        f = feedbackForces[0];
         f.x += weight * (prev.x + next.x - 2 * curr.x);
         f.y += weight * (prev.y + next.y - 2 * curr.y);
         
         // middle points
         for (int i = 1; i < n - 1; i++)
         {
-            f = modelForces[i];
+            f = feedbackForces[i];
             prev = points.get(i - 1);
             curr = points.get(i);
             next = points.get(i + 1);
@@ -1023,7 +1044,7 @@ public class ActiveContour extends Detection
         }
         
         // last point
-        f = modelForces[n - 1];
+        f = feedbackForces[n - 1];
         prev = points.get(n - 2);
         curr = points.get(n - 1);
         next = points.get(0);
@@ -1040,7 +1061,7 @@ public class ActiveContour extends Detection
      *            the contour that is being penetrated
      * @return the number of actual point-mesh intersection tests
      */
-    int updateFeedbackForces(ActiveContour target)
+    int computeFeedbackForces(ActiveContour target)
     {
         updateNormalsIfNeeded();
         
@@ -1066,7 +1087,7 @@ public class ActiveContour extends Detection
                 
                 if ((penetration = target.isInside(p, targetCenter)) > 0)
                 {
-                    feedbackForce.scale(penetration * -2.0, contourNormals[index]);
+                    feedbackForce.scaleAdd(penetration * -0.25, contourNormals[index], feedbackForce);
                 }
             }
             index++;
