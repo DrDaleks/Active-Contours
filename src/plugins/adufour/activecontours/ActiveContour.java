@@ -132,7 +132,7 @@ public class ActiveContour extends Detection
         points.ensureCapacity(contour.points.size());
         
         for (Point3d p : contour.points)
-            addPoint(p);
+            addPoint(new Point3d(p));
         
         // in any case, don't forget to close the path
         path.closePath();
