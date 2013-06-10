@@ -3,7 +3,6 @@ package plugins.adufour.activecontours;
 import icy.image.IcyBufferedImage;
 import icy.image.IcyBufferedImageUtil;
 import icy.main.Icy;
-import icy.painter.Painter;
 import icy.roi.BooleanMask2D;
 import icy.roi.ROI;
 import icy.roi.ROI2D;
@@ -230,7 +229,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         }
         
         // replace any ActiveContours Painter object on the sequence by ours
-        for (Painter painter : inputData.getPainters())
+        for (icy.painter.Painter painter : inputData.getPainters())
             if (painter instanceof ActiveContoursOverlay) inputData.removePainter(painter);
         
         painter = new ActiveContoursOverlay(trackGroup);
