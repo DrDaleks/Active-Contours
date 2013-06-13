@@ -1,5 +1,6 @@
 package plugins.adufour.activecontours;
 
+import icy.gui.viewer.Viewer;
 import icy.image.IcyBufferedImage;
 import icy.image.IcyBufferedImageUtil;
 import icy.main.Icy;
@@ -24,6 +25,7 @@ import java.awt.Graphics2D;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.concurrent.ExecutionException;
@@ -210,23 +212,20 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         
         globalStop = false;
         
-        int startT = inputData.getFirstViewer().getPositionT();
+        int startT = inputData.getFirstViewer() == null ? 0 : inputData.getFirstViewer().getPositionT();
         int endT = tracking.getValue() ? inputData.getSizeT() - 1 : startT;
         
-        trackPool.clearTracks();
-        trackGroup = new TrackGroup(inputData);
-        trackPool.getTrackGroupList().add(trackGroup);
-        
-        if (tracking.getValue())
+        ThreadUtil.invokeNow(new Runnable()
         {
-            ThreadUtil.invokeLater(new Runnable()
+            @Override
+            public void run()
             {
-                public void run()
-                {
-                    Icy.getMainInterface().getSwimmingPool().add(new SwimmingObject(trackGroup));
-                }
-            });
-        }
+                trackGroup = new TrackGroup(inputData);
+                trackGroup.setDescription("Active contours (" + new Date().toString() + ")");
+                trackPool.getTrackGroupList().add(trackGroup);
+                if (tracking.getValue()) Icy.getMainInterface().getSwimmingPool().add(new SwimmingObject(trackGroup));
+            }
+        });
         
         // replace any ActiveContours Painter object on the sequence by ours
         for (icy.painter.Painter painter : inputData.getPainters())
@@ -249,7 +248,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         
         for (int t = startT; t <= endT; t++)
         {
-            if (getUI() != null && inputData.getFirstViewer() != null) inputData.getFirstViewer().setPositionT(t);
+            if (inputData.getFirstViewer() != null) inputData.getFirstViewer().setPositionT(t);
             initContours(t, t == startT);
             evolveContours(t);
             ThreadUtil.sleep(200);
@@ -257,11 +256,9 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             // store detections and results
             storeResult(t);
             
-            if (Thread.currentThread().isInterrupted())
-            {
-                globalStop = true;
-                break;
-            }
+            if (Thread.currentThread().isInterrupted()) globalStop = true;
+            
+            if (globalStop) break;
         }
         
         if (getUI() != null)
@@ -303,7 +300,9 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     {
         // 1) Initialize the edge data
         
-        int z = inputData.getFirstViewer().getPositionZ();
+        Viewer v = inputData.getFirstViewer();
+        
+        int z = v == null ? 0 : inputData.getFirstViewer().getPositionZ();
         
         IcyBufferedImage edgeInputData = inputData.getSizeC() > 1 ? inputData.getImage(t, z, edge_c.getValue()) : inputData.getImage(t, z);
         
@@ -1028,12 +1027,22 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         
         coupling_flag.setValue(true);
         inputMap.add("contour resolution", contour_resolution.getVariable());
+        contour_resolution.addVarChangeListener(new EzVarListener<Double>()
+        {
+            @Override
+            public void variableChanged(EzVar<Double> source, Double newValue)
+            {
+                convergence_winSize.setValue((int) (100.0 / newValue));
+            }
+        });
+        
         // inputMap.add("minimum object size", contour_minArea.getVariable());
         inputMap.add("region bounds", evolution_bounds.getVariable());
         inputMap.add("time step", contour_timeStep.getVariable());
         // inputMap.add("convergence window size", convergence_winSize.getVariable());
         inputMap.add("convergence value", convergence_criterion.getVariable());
         output_rois.setValue(true);
+        inputMap.add("tracking", tracking.getVariable());
     }
     
     @Override
