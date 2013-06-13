@@ -928,7 +928,6 @@ public class ActiveContour extends Detection
     void computeRegionForces(IcyBufferedImage region_data, double weight, double cin, double sin, double cout, double sout)
     {
         // uncomment these 2 lines for mean-based information
-        double dataMax = region_data.getChannelMax(0);
         double sensitivity = 1 / Math.max(cout * 2, cin);
         
         updateNormalsIfNeeded();
@@ -950,8 +949,7 @@ public class ActiveContour extends Detection
             if (p.x < 1 || p.y < 1 || p.x >= w - 1 || p.y >= h - 1) continue;
             
             // invert the following lines for mean-based information
-            val = getPixelValue(region_data, p.x, p.y) / dataMax;
-            // val = getPixelValue(region_data, p.x, p.y);
+            val = getPixelValue(region_data, p.x, p.y);
             inDiff = val - cin;
             outDiff = val - cout;
             sum = weight * contour_resolution.getValue() * (sensitivity * (outDiff * outDiff) - (inDiff * inDiff));
@@ -1015,6 +1013,8 @@ public class ActiveContour extends Detection
     
     void computeInternalForces(double weight)
     {
+        if (feedbackForces == null) return;
+        
         int n = points.size();
         
         if (n < 3) return;
