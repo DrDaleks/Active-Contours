@@ -127,6 +127,7 @@ public class ActiveContour extends Detection
         
         setX(contour.x);
         setY(contour.y);
+        setZ(contour.z);
         
         setColor(contour.getColor());
         points.ensureCapacity(contour.points.size());
@@ -135,7 +136,7 @@ public class ActiveContour extends Detection
             addPoint(new Point3d(p));
         
         // in any case, don't forget to close the path
-        path.closePath();
+        updatePath();
         
         counterClockWise = (getAlgebraicArea() > 0);
     }
@@ -205,8 +206,8 @@ public class ActiveContour extends Detection
                 
                 // the final one should be a "close" operation, do nothing
             }
-            // in any case, don't forget to close the path
-            path.closePath();
+            
+            updatePath();
             
             area = getAlgebraicArea();
         }
@@ -433,17 +434,6 @@ public class ActiveContour extends Detection
     private void addPoint(Point3d p)
     {
         points.add(p);
-        
-        if (points.size() == 1)
-        {
-            // first point was added => start the path
-            path.moveTo(p.x, p.y);
-        }
-        else
-        {
-            // draw the path using lines (for now)
-            path.lineTo(p.x, p.y);
-        }
     }
     
     /**
@@ -554,21 +544,7 @@ public class ActiveContour extends Detection
             }
         }
         
-        synchronized (path)
-        {
-            path.reset();
-            
-            Point3d p = points.get(0);
-            path.moveTo(p.x, p.y);
-            
-            for (int i = 1; i < nbPoints; i++)
-            {
-                p = points.get(i);
-                path.lineTo(p.x, p.y);
-            }
-            
-            path.closePath();
-        }
+        updatePath();
         
         normalsNeedUpdate = true;
         boundingSphereNeedsUpdate = true;
@@ -589,7 +565,7 @@ public class ActiveContour extends Detection
      */
     private ActiveContour[] checkSelfIntersection(double minSpacing, double minArea)
     {
-        int i = 0, j = 0, end, n = points.size();
+        int i = 0, j = 0, n = points.size();
         Point3d p_i = null, p_j = null;
         
         boolean intersection = false;
@@ -635,19 +611,35 @@ public class ActiveContour extends Detection
         
         if (!intersection) return null;
         
-        end = j - i;
+        Point3d center = new Point3d();
+        
+        int nPoints = j - i;
         ActiveContour c1 = new ActiveContour(this.owner, contour_resolution, contour_minArea, new SlidingWindow(this.convergence.size));
+        for (int p = 0; p < nPoints; p++)
+        {
+            Point3d pp = points.get(p + i);
+            center.add(pp);
+            c1.addPoint(pp);
+        }
+        center.scale(1.0 / nPoints);
+        c1.setX(center.x);
+        c1.setY(center.y);
+        c1.setZ(center.z);
         c1.setT(getT());
         
-        for (int p = 0; p < end; p++)
-            c1.addPoint(points.get(p + i));
+        center.set(0, 0, 0);
         
-        end = i + n - j;
+        nPoints = i + n - j;
         ActiveContour c2 = new ActiveContour(this.owner, contour_resolution, contour_minArea, new SlidingWindow(this.convergence.size));
-        c2.setT(getT());
+        for (int p = 0, pj = p + j; p < nPoints; p++, pj++)
+        {
+            Point3d pp = points.get(pj < n ? pj : pj - n);
+            center.add(pp);
+            c2.addPoint(pp);
+        }
+        center.scale(1.0 / nPoints);
         
-        for (int p = 0, pj = p + j; p < end; p++, pj++)
-            c2.addPoint(points.get(pj < n ? pj : pj - n));
+        c2.setT(getT());
         
         // determine whether the intersection is a loop or a division
         // rationale: check the normal of the two colliding points (i & j)
@@ -1087,7 +1079,7 @@ public class ActiveContour extends Detection
                 
                 if ((penetration = target.isInside(p, targetCenter)) > 0)
                 {
-                    feedbackForce.scaleAdd(penetration * -0.25, contourNormals[index], feedbackForce);
+                    feedbackForce.scaleAdd(-penetration, contourNormals[index], feedbackForce);
                 }
             }
             index++;
@@ -1192,31 +1184,31 @@ public class ActiveContour extends Detection
         switch (order)
         {
         
-            case 0: // number of points
+        case 0: // number of points
+        {
+            return points.size();
+        }
+        
+        case 1: // perimeter
+        {
+            Point3d p1;
+            Point3d p2;
+            double l = 0.0;
+            int size = points.size();
+            for (int i = 0; i < size; i++)
             {
-                return points.size();
+                p1 = points.get(i);
+                p2 = points.get((i + 1) % size);
+                l += Math.abs(p1.distance(p2));
             }
-            
-            case 1: // perimeter
-            {
-                Point3d p1;
-                Point3d p2;
-                double l = 0.0;
-                int size = points.size();
-                for (int i = 0; i < size; i++)
-                {
-                    p1 = points.get(i);
-                    p2 = points.get((i + 1) % size);
-                    l += Math.abs(p1.distance(p2));
-                }
-                return l;
-            }
-            case 2: // area
-            {
-                return Math.abs(getAlgebraicArea());
-            }
-            default:
-                throw new UnsupportedOperationException("Dimension " + order + " not implemented");
+            return l;
+        }
+        case 2: // area
+        {
+            return Math.abs(getAlgebraicArea());
+        }
+        default:
+            throw new UnsupportedOperationException("Dimension " + order + " not implemented");
         }
     }
     
@@ -1232,7 +1224,8 @@ public class ActiveContour extends Detection
         
         double stroke = Math.max(canvas.canvasToImageLogDeltaX(3), canvas.canvasToImageLogDeltaY(3));
         
-        g.setStroke(new BasicStroke((float) stroke));
+        // g.setStroke(new BasicStroke((float) stroke));
+        g.setStroke(new BasicStroke((float) stroke, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
         
         g.setColor(getColor());
         
@@ -1245,5 +1238,29 @@ public class ActiveContour extends Detection
     public ArrayList<Point3d> getPoints()
     {
         return points;
+    }
+    
+    private void updatePath()
+    {
+        synchronized (path)
+        {
+            path.reset();
+            
+            int nbPoints = points.size();
+            
+            Point3d p = points.get(0);
+            path.moveTo(p.x, p.y);
+            
+            for (int i = 1; i < nbPoints; i++)
+            {
+                p = points.get(i);
+                path.lineTo(p.x, p.y);
+                // TODO
+                // Point3d pp = points.get(i-1);
+                // path.quadTo((pp.x + p.x)/2, (pp.y + p.y)/2, p.x, p.y);
+            }
+            
+            path.closePath();
+        }
     }
 }

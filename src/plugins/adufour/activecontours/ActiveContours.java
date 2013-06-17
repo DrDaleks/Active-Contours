@@ -28,6 +28,7 @@ import java.util.Collection;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -57,7 +58,6 @@ import plugins.adufour.vars.lang.VarBoolean;
 import plugins.adufour.vars.lang.VarROIArray;
 import plugins.fab.trackmanager.TrackGroup;
 import plugins.fab.trackmanager.TrackManager;
-import plugins.fab.trackmanager.TrackPool;
 import plugins.fab.trackmanager.TrackSegment;
 import plugins.nchenouard.spot.Detection;
 
@@ -119,7 +119,6 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     
     private boolean                        globalStop;
     
-    private final TrackPool                trackPool               = new TrackPool();
     private TrackGroup                     trackGroup;
     
     private ActiveContoursOverlay          painter;
@@ -222,8 +221,11 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             {
                 trackGroup = new TrackGroup(inputData);
                 trackGroup.setDescription("Active contours (" + new Date().toString() + ")");
-                trackPool.getTrackGroupList().add(trackGroup);
-                if (tracking.getValue()) Icy.getMainInterface().getSwimmingPool().add(new SwimmingObject(trackGroup));
+                if (tracking.getValue())
+                {
+                    SwimmingObject object = new SwimmingObject(trackGroup); 
+                    Icy.getMainInterface().getSwimmingPool().add(object);
+                }
             }
         });
         
@@ -275,24 +277,21 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             
             if (tracking.getValue())
             {
-                SwimmingObject object = new SwimmingObject(trackGroup);
-                trackPool.addResult(object);
-                
                 ThreadUtil.invokeLater(new Runnable()
                 {
                     public void run()
                     {
                         TrackManager tm = new TrackManager();
+                        tm.reOrganize();
                         tm.setDisplaySequence(inputData);
                     }
                 });
             }
         }
-        
-        if (getUI() == null)
+        else
         {
             // possibly block mode, remove the painter after processing
-//            if (inputData != null) inputData.removePainter(painter);
+            // if (inputData != null) inputData.removePainter(painter);
         }
     }
     
@@ -356,8 +355,6 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             region_globl_mask_graphics = region_globl_mask.createGraphics();
         }
         
-        region_cin.clear();
-        
         // 1) Initialize the contours
         
         if (isFirstImage)
@@ -366,8 +363,6 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             // for (Painter p : inSeq.getPainters())
             // if (p instanceof ActiveContoursPainter)
             // inSeq.removePainter(p);
-            
-            trackGroup.getTrackSegmentList().clear();
             
             if (roiInput.getValue().length == 0)
             {
@@ -410,7 +405,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                                 contour.setT(t);
                                 TrackSegment segment = new TrackSegment();
                                 segment.addDetection(contour);
-                                trackGroup.getTrackSegmentList().add(segment);
+                                trackGroup.addTrackSegment(segment);
                             }
                         }
                         else
@@ -421,7 +416,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                             contour.setT(t);
                             TrackSegment segment = new TrackSegment();
                             segment.addDetection(contour);
-                            trackGroup.getTrackSegmentList().add(segment);
+                            trackGroup.addTrackSegment(segment);
                         }
                     }
                 }));
@@ -703,172 +698,29 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 // no multi-threading needed
                 
                 ActiveContour contour = evolvingContours.iterator().next();
-                
-                try
-                {
-                    contour.reSample(0.8, 1.4);
-                }
-                catch (TopologyException e)
-                {
-                    loop.setValue(true);
-                    
-                    allContours.remove(contour);
-                    evolvingContours.remove(contour);
-                    
-                    TrackSegment motherSegment = null;
-                    
-                    ArrayList<TrackSegment> segments = trackGroup.getTrackSegmentList();
-                    for (int i = 0; i < segments.size(); i++)
-                    {
-                        TrackSegment segment = segments.get(i);
-                        
-                        if (segment.containsDetection(contour))
-                        {
-                            segment.removeDetection(contour);
-                            
-                            if (segment.getDetectionList().size() == 0)
-                            {
-                                segments.remove(i--);
-                            }
-                            else
-                            {
-                                motherSegment = segment;
-                            }
-                            break;
-                        }
-                    }
-                    
-                    for (ActiveContour child : e.children)
-                    {
-                        allContours.add(child);
-                        evolvingContours.add(child);
-                        TrackSegment childSegment = new TrackSegment();
-                        childSegment.addDetection(child);
-                        trackGroup.addTrackSegment(childSegment);
-                        if (motherSegment != null && motherSegment.getDetectionList().size() > 0) trackPool.createLink(motherSegment, childSegment);
-                    }
-                    
-                    if (region_weight.getValue() > EPSILON) updateRegionInformation(allContours, t);
-                }
-                catch (NullPointerException npe)
-                {
-                    allContours.remove(contour);
-                    evolvingContours.remove(contour);
-                    
-                    ArrayList<TrackSegment> segments = trackGroup.getTrackSegmentList();
-                    for (int i = 0; i < segments.size(); i++)
-                    {
-                        TrackSegment segment = segments.get(i);
-                        
-                        if (segment.containsDetection(contour))
-                        {
-                            segment.removeDetection(contour);
-                            
-                            if (segment.getDetectionList().size() == 0)
-                            {
-                                segments.remove(i--);
-                            }
-                            
-                            break;
-                        }
-                    }
-                    
-                    if (region_weight.getValue() > EPSILON) updateRegionInformation(allContours, t);
-                }
+                boolean change = new ReSampler(trackGroup, contour, evolvingContours, allContours).call();
+                if (change) loop.setValue(true);
             }
             else
             {
-                ArrayList<Future<?>> tasks = new ArrayList<Future<?>>(evolvingContours.size());
+                ArrayList<ReSampler> tasks = new ArrayList<ReSampler>(evolvingContours.size());
                 
                 for (final ActiveContour contour : evolvingContours)
-                {
-                    tasks.add(contourEvolutionService.submit(new Runnable()
-                    {
-                        public void run()
-                        {
-                            try
-                            {
-                                contour.reSample(0.8, 1.4);
-                            }
-                            catch (TopologyException e)
-                            {
-                                loop.setValue(true);
-                                
-                                allContours.remove(contour);
-                                evolvingContours.remove(contour);
-                                
-                                TrackSegment motherSegment = null;
-                                
-                                ArrayList<TrackSegment> segments = trackGroup.getTrackSegmentList();
-                                for (int i = 0; i < segments.size(); i++)
-                                {
-                                    TrackSegment segment = segments.get(i);
-                                    
-                                    if (segment.containsDetection(contour))
-                                    {
-                                        segment.removeDetection(contour);
-                                        
-                                        if (segment.getDetectionList().size() == 0)
-                                        {
-                                            segments.remove(i--);
-                                        }
-                                        else
-                                        {
-                                            motherSegment = segment;
-                                        }
-                                        break;
-                                    }
-                                }
-                                
-                                for (ActiveContour child : e.children)
-                                {
-                                    allContours.add(child);
-                                    evolvingContours.add(child);
-                                    TrackSegment childSegment = new TrackSegment();
-                                    childSegment.addDetection(child);
-                                    trackGroup.addTrackSegment(childSegment);
-                                    if (motherSegment != null && motherSegment.getDetectionList().size() > 0) trackPool.createLink(motherSegment, childSegment);
-                                }
-                                
-                                if (region_weight.getValue() > EPSILON) updateRegionInformation(allContours, t);
-                            }
-                            catch (NullPointerException npe)
-                            {
-                                allContours.remove(contour);
-                                evolvingContours.remove(contour);
-                                
-                                ArrayList<TrackSegment> segments = trackGroup.getTrackSegmentList();
-                                for (int i = 0; i < segments.size(); i++)
-                                {
-                                    TrackSegment segment = segments.get(i);
-                                    
-                                    if (segment.containsDetection(contour))
-                                    {
-                                        segment.removeDetection(contour);
-                                        
-                                        if (segment.getDetectionList().size() == 0)
-                                        {
-                                            segments.remove(i--);
-                                        }
-                                        
-                                        break;
-                                    }
-                                }
-                                
-                                if (region_weight.getValue() > EPSILON) updateRegionInformation(allContours, t);
-                            }
-                        }
-                    }));
-                }
+                    tasks.add(new ReSampler(trackGroup, contour, evolvingContours, allContours));
+                
+                List<Future<Boolean>> results = null;
                 
                 try
                 {
-                    for (Future<?> f : tasks)
-                        f.get();
+                    results = contourEvolutionService.invokeAll(tasks);
+                    for (Future<Boolean> f : results)
+                    {
+                        if (f.get()) loop.setValue(true);
+                    }
                 }
                 catch (InterruptedException e)
                 {
-                    for (Future<?> f : tasks)
+                    if (results != null) for (Future<?> f : results)
                         f.cancel(true);
                     
                     loop.setValue(false);
@@ -880,10 +732,15 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 }
             }
         }
+        
+        if (region_weight.getValue() > EPSILON) updateRegionInformation(allContours, t);
     }
     
     private void updateRegionInformation(Collection<ActiveContour> contours, int t)
     {
+        region_cin.clear();
+        region_sin.clear();
+        
         ArrayList<Future<?>> tasks = new ArrayList<Future<?>>(contours.size());
         
         final double[] _region_data = region_data.getDataXYAsDouble(0);
