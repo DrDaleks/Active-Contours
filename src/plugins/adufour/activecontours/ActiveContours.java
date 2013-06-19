@@ -345,7 +345,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         
         if (regionInputData == null) throw new IcyHandledException("The region input data is invalid.  Make sure the selected channel is valid.");
         
-        region_data = IcyBufferedImageUtil.convertToType(regionInputData, DataType.DOUBLE, true);
+        region_data = IcyBufferedImageUtil.convertToType(regionInputData, DataType.DOUBLE, true, true);
         
         if (isFirstImage)
         {
