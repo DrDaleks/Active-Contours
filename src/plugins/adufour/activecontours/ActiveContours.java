@@ -267,7 +267,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         {
             getUI().setProgressBarValue(0.0);
             
-            if (output_rois.getValue())
+            if (output_rois.getValue() && outputSequence_rois != null)
             {
                 outputSequence_rois.setName(inputData.getName() + " + active contours");
                 for (ROI roi : roiOutput.getValue())
