@@ -112,7 +112,7 @@ public class ActiveContour extends Detection
         this.contour_minArea = contour_minArea;
         this.convergence = convergenceWindow;
         
-        setColor(new Color((float) Math.random(), (float) Math.random(), (float) Math.random()));
+        setColor(Color.getHSBColor((float) Math.random(), 0.8f, 0.9f));
     }
     
     /**
@@ -1184,31 +1184,31 @@ public class ActiveContour extends Detection
         switch (order)
         {
         
-        case 0: // number of points
-        {
-            return points.size();
-        }
-        
-        case 1: // perimeter
-        {
-            Point3d p1;
-            Point3d p2;
-            double l = 0.0;
-            int size = points.size();
-            for (int i = 0; i < size; i++)
+            case 0: // number of points
             {
-                p1 = points.get(i);
-                p2 = points.get((i + 1) % size);
-                l += Math.abs(p1.distance(p2));
+                return points.size();
             }
-            return l;
-        }
-        case 2: // area
-        {
-            return Math.abs(getAlgebraicArea());
-        }
-        default:
-            throw new UnsupportedOperationException("Dimension " + order + " not implemented");
+            
+            case 1: // perimeter
+            {
+                Point3d p1;
+                Point3d p2;
+                double l = 0.0;
+                int size = points.size();
+                for (int i = 0; i < size; i++)
+                {
+                    p1 = points.get(i);
+                    p2 = points.get((i + 1) % size);
+                    l += Math.abs(p1.distance(p2));
+                }
+                return l;
+            }
+            case 2: // area
+            {
+                return Math.abs(getAlgebraicArea());
+            }
+            default:
+                throw new UnsupportedOperationException("Dimension " + order + " not implemented");
         }
     }
     
@@ -1217,14 +1217,11 @@ public class ActiveContour extends Detection
     {
         if (getT() != canvas.getPositionT() || !enabled) return;
         
-        int fontSize = (int) canvas.canvasToImageLogDeltaX(20);
-        if (fontSize < 1) fontSize = 1;
-        Font font = new Font("Arial", Font.BOLD, fontSize);
-        g.setFont(font);
+        float fontSize = (float) canvas.canvasToImageLogDeltaX(30);
+        g.setFont(new Font("Trebuchet MS", Font.BOLD, 10).deriveFont(fontSize));
         
         double stroke = Math.max(canvas.canvasToImageLogDeltaX(3), canvas.canvasToImageLogDeltaY(3));
         
-        // g.setStroke(new BasicStroke((float) stroke));
         g.setStroke(new BasicStroke((float) stroke, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
         
         g.setColor(getColor());
