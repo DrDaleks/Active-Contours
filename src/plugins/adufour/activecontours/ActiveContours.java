@@ -56,6 +56,7 @@ import plugins.adufour.filtering.ConvolutionException;
 import plugins.adufour.filtering.Kernels1D;
 import plugins.adufour.vars.lang.VarBoolean;
 import plugins.adufour.vars.lang.VarROIArray;
+import plugins.adufour.vars.util.VarException;
 import plugins.fab.trackmanager.TrackGroup;
 import plugins.fab.trackmanager.TrackManager;
 import plugins.fab.trackmanager.TrackSegment;
@@ -366,6 +367,8 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             
             if (roiInput.getValue().length == 0)
             {
+                if (isHeadLess()) throw new VarException("Active contours: no input ROI");
+                
                 ArrayList<ROI2D> roiFromSequence = inputData.getROI2Ds();
                 
                 if (roiFromSequence.isEmpty()) throw new EzException("Please draw or select a ROI", true);
