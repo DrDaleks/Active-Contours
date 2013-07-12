@@ -43,22 +43,23 @@ public class ActiveContoursOverlay extends Overlay
         }
         else
         {
-            ArrayList<TrackSegment> segments = trackPool.getTrackSegmentList();
+            ArrayList<TrackSegment> segments = new ArrayList<TrackSegment>(trackPool.getTrackSegmentList());
             
-            for (int i = 1; i <= segments.size(); i++)
+            int id = 1;
+            for (TrackSegment segment : segments)
             {
-                TrackSegment segment = segments.get(i - 1);
                 ArrayList<Detection> detections = segment.getDetectionList();
-                for (int d = 0; d < detections.size(); d++)
+                
+                for (Detection det : detections)
                 {
-                    Detection det = detections.get(d);
-                    
                     if (det.getT() == canvas.getPositionT())
                     {
                         ((ActiveContour) det).paint(g, sequence, canvas);
-                        GraphicsUtil.drawCenteredString(g, "" + i, (int) det.getX(), (int) det.getY(), false);
+                        GraphicsUtil.drawCenteredString(g, "" + id, (int) det.getX(), (int) det.getY(), false);
                     }
                 }
+                
+                id++;
             }
         }
     }
