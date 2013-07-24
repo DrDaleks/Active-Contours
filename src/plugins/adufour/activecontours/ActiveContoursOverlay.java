@@ -48,7 +48,7 @@ public class ActiveContoursOverlay extends Overlay
             int id = 1;
             for (TrackSegment segment : segments)
             {
-                ArrayList<Detection> detections = segment.getDetectionList();
+                ArrayList<Detection> detections = new ArrayList<Detection>(segment.getDetectionList());
                 
                 for (Detection det : detections)
                 {
