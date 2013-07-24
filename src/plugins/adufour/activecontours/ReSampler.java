@@ -1,5 +1,6 @@
 package plugins.adufour.activecontours;
 
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.concurrent.Callable;
 
@@ -46,8 +47,8 @@ public class ReSampler implements Callable<Boolean>
             
             TrackSegment currentSegment = null;
             
-            // currentSegment = trackPool.getTrackSegmentWithDetection(contour);
-            for (TrackSegment segment : trackGroup.getTrackSegmentList())
+            // this is a thread-safe version of TrackGroup.getTrackSegmentWithDetection(Detection)
+            for (TrackSegment segment : new ArrayList<TrackSegment>(trackGroup.getTrackSegmentList()))
             {
                 if (segment.containsDetection(contour))
                 {
@@ -56,14 +57,17 @@ public class ReSampler implements Callable<Boolean>
                 }
             }
             
-            currentSegment.removeDetection(contour);
-            
-            if (currentSegment.getDetectionList().size() == 0)
+            if (currentSegment != null)
             {
-                // the current contour is the only detection in this segment
-                // => remove the whole segment
-                trackGroup.removeTrackSegment(currentSegment);
-                currentSegment = null;
+                currentSegment.removeDetection(contour);
+                
+                if (currentSegment.getDetectionList().size() == 0)
+                {
+                    // the current contour is the only detection in this segment
+                    // => remove the whole segment
+                    trackGroup.removeTrackSegment(currentSegment);
+                    currentSegment = null;
+                }
             }
             
             // 3) Deal with the children
@@ -82,7 +86,7 @@ public class ReSampler implements Callable<Boolean>
                 if (currentSegment != null) currentSegment.addNext(childSegment);
             }
         }
-       
+        
         return change;
     }
 }
