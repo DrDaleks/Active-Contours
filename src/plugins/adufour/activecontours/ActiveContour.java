@@ -710,8 +710,10 @@ public class ActiveContour extends Detection
             Point3d p = points.get(index);
             try
             {
+                // apply model forces if p lies within the area of interest
                 if (boundToField && field.contains(p.x, p.y)) force.set(modelForces[index]);
                 
+                // apply feeback forces all the time
                 force.add(feedbackForces[index]);
                 
                 force.scale(timeStep);
@@ -1057,15 +1059,6 @@ public class ActiveContour extends Detection
     {
         updateNormalsIfNeeded();
         
-//        int n = points.size();
-//        Vector3d dispSum = new Vector3d();
-//        for (int i = 0; i < n; i++)
-//            dispSum.add(modelForces[i]);
-//        double delta = dispSum.length();
-//        
-//        double weight = 1.0;
-//        if (delta > 0.0) weight = 10.0;
-//        else if (delta < 0.0) weight = 0.2;
         BoundingSphere targetSphere = target.getBoundingSphere();
         Point3d targetCenter = new Point3d();
         targetSphere.getCenter(targetCenter);
@@ -1089,7 +1082,6 @@ public class ActiveContour extends Detection
                 if ((penetration = target.isInside(p, targetCenter)) > 0)
                 {
                     feedbackForce.scaleAdd(-penetration, contourNormals[index], feedbackForce);
-//                    feedbackForce.scaleAdd(-penetration * weight, contourNormals[index], feedbackForce);
                 }
             }
             index++;
