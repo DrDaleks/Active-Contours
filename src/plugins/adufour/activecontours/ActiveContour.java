@@ -638,7 +638,9 @@ public class ActiveContour extends Detection
             c2.addPoint(pp);
         }
         center.scale(1.0 / nPoints);
-        
+        c2.setX(center.x);
+        c2.setY(center.y);
+        c2.setZ(center.z);
         c2.setT(getT());
         
         // determine whether the intersection is a loop or a division
@@ -705,33 +707,31 @@ public class ActiveContour extends Detection
         double maxDisp = contour_resolution.getValue() * timeStep;
         
         int n = points.size();
+        
         for (int index = 0; index < n; index++)
         {
             Point3d p = points.get(index);
-            try
-            {
-                // apply model forces if p lies within the area of interest
-                if (boundToField && field.contains(p.x, p.y)) force.set(modelForces[index]);
-                
-                // apply feeback forces all the time
-                force.add(feedbackForces[index]);
-                
-                force.scale(timeStep);
-                
-                double disp = force.length();
-                
-                if (disp > maxDisp) force.scale(maxDisp / disp);
-                
-                p.add(force);
-                force.set(0, 0, 0);
-                
-                modelForces[index].set(0, 0, 0);
-                feedbackForces[index].set(0, 0, 0);
-            }
-            catch (NullPointerException e)
-            {
-                e.printStackTrace();
-            }
+            
+            // apply model forces if p lies within the area of interest
+            if (boundToField && field.contains(p.x, p.y)) force.set(modelForces[index]);
+            
+            // apply feeback forces all the time
+            force.add(feedbackForces[index]);
+            
+            force.scale(timeStep);
+            
+            double disp = force.length();
+            
+            if (disp > maxDisp) force.scale(maxDisp / disp);
+            
+            p.add(force);
+            
+            setX(getX() + force.x / n);
+            setY(getY() + force.y / n);
+            force.set(0, 0, 0);
+            
+            modelForces[index].set(0, 0, 0);
+            feedbackForces[index].set(0, 0, 0);
         }
         normalsNeedUpdate = true;
         boundingSphereNeedsUpdate = true;
@@ -930,13 +930,14 @@ public class ActiveContour extends Detection
         Vector3d f, norm;
         double val, inDiff, outDiff, sum;
         int n = points.size();
-        int w = region_data.getSizeX();
-        int h = region_data.getSizeY();
+        int w = region_data.getWidth();
+        int h = region_data.getHeight();
         
         for (int i = 0; i < n; i++)
         {
             p = points.get(i);
             f = modelForces[i];
+            
             norm = contourNormals[i];
             
             // bounds check
