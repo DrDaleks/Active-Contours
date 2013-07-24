@@ -17,7 +17,7 @@ public class ActiveContoursOverlay extends Overlay
 {
     private HashMap<Integer, ArrayList<ActiveContour>> contoursMap;
     
-    private TrackGroup                                 trackPool;
+    private TrackGroup                                 trackGroup;
     
     public ActiveContoursOverlay(HashMap<Integer, ArrayList<ActiveContour>> contours)
     {
@@ -25,10 +25,10 @@ public class ActiveContoursOverlay extends Overlay
         contoursMap = contours;
     }
     
-    public ActiveContoursOverlay(TrackGroup trackPool)
+    public ActiveContoursOverlay(TrackGroup trackGroup)
     {
         super("Active contours");
-        this.trackPool = trackPool;
+        this.trackGroup = trackGroup;
     }
     
     @Override
@@ -36,14 +36,14 @@ public class ActiveContoursOverlay extends Overlay
     {
         int t = canvas.getPositionT();
         
-        if (trackPool == null)
+        if (trackGroup == null)
         {
             if (contoursMap.containsKey(t)) for (ActiveContour contour : contoursMap.get(t))
                 contour.paint(g, sequence, canvas);
         }
         else
         {
-            ArrayList<TrackSegment> segments = new ArrayList<TrackSegment>(trackPool.getTrackSegmentList());
+            ArrayList<TrackSegment> segments = new ArrayList<TrackSegment>(trackGroup.getTrackSegmentList());
             
             int id = 1;
             for (TrackSegment segment : segments)
