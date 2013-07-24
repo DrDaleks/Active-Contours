@@ -22,6 +22,7 @@ import icy.util.ShapeUtil.ShapeOperation;
 import icy.util.StringUtil;
 
 import java.awt.Graphics2D;
+import java.awt.Rectangle;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -104,9 +105,6 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     
     private IcyBufferedImage               edgeDataX, edgeDataY;
     private IcyBufferedImage               region_data;
-    private IcyBufferedImage               region_local_mask;
-    private Graphics2D                     region_local_mask_graphics;
-    byte[]                                 _region_globl_mask;
     
     private IcyBufferedImage               region_globl_mask;
     private Graphics2D                     region_globl_mask_graphics;
@@ -355,9 +353,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         
         if (isFirstImage)
         {
-            region_local_mask = new IcyBufferedImage(region_data.getWidth(), region_data.getHeight(), 1, DataType.UBYTE);
-            region_local_mask_graphics = region_local_mask.createGraphics();
-            region_globl_mask = new IcyBufferedImage(region_data.getWidth(), region_data.getHeight(), 1, DataType.UBYTE);
+            region_globl_mask = new IcyBufferedImage(region_data.getWidth(), region_data.getHeight(), 1, DataType.UINT);
             region_globl_mask_graphics = region_globl_mask.createGraphics();
         }
         
@@ -512,13 +508,14 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 if (criterion != null && criterion < convergence_criterion.getValue() / 10)
                 {
                     nbConvergedContours++;
-                    if (getUI() != null) getUI().setProgressBarValue((double) nbConvergedContours / allContours.size());
                     continue;
                 }
                 
                 // if the contour hasn't converged yet, store it for the main loop
                 evolvingContours.add(contour);
             }
+            
+            if (getUI() != null) getUI().setProgressBarValue((double) nbConvergedContours / allContours.size());
             
             // re-sample the contours to ensure homogeneous resolution
             resampleContours(evolvingContours, allContours, t);
@@ -532,6 +529,8 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             iter++;
             
             if (Thread.currentThread().isInterrupted()) globalStop = true;
+            
+            painter.painterChanged();
         }
     }
     
@@ -552,6 +551,8 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             final Object _region_data = region_data.getDataXY(0);
             final double max = region_data.getChannelTypeMax(0);
             final DataType type = region_data.getDataType_();
+            
+            final byte[] _region_globl_mask = region_globl_mask.getDataXYAsByte(0);
             
             int w = region_data.getWidth();
             int h = region_data.getHeight();
@@ -612,17 +613,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             
             if (Math.abs(balloon_weight.getValue()) > EPSILON) contour.computeBalloonForces(balloon_weight.getValue());
             
-            if (coupling_flag.getValue())
-            {
-                // warning: feedback must be computed against ALL contours
-                // (including those which have already converged)
-                for (ActiveContour otherContour : allContours)
-                {
-                    if (otherContour == null || otherContour == contour) continue;
-                    
-                    contour.computeFeedbackForces(otherContour);
-                }
-            }
+            contour.move(field, true, contour_timeStep.getValue());
         }
         else
         {
@@ -685,14 +676,13 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                     contour.move(field, true, contour_timeStep.getValue());
             }
         }
-        
-        // refresh the display
-        painter.painterChanged();
     }
     
     private void resampleContours(final HashSet<ActiveContour> evolvingContours, final HashSet<ActiveContour> allContours, final int t)
     {
         final VarBoolean loop = new VarBoolean("loop", true);
+        
+        final VarBoolean change = new VarBoolean("change", false);
         
         while (loop.getValue())
         {
@@ -703,8 +693,12 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 // no multi-threading needed
                 
                 ActiveContour contour = evolvingContours.iterator().next();
-                boolean change = new ReSampler(trackGroup, contour, evolvingContours, allContours).call();
-                if (change) loop.setValue(true);
+                ReSampler reSampler = new ReSampler(trackGroup, contour, evolvingContours, allContours);
+                if (reSampler.call())
+                {
+                    change.setValue(true);
+                    loop.setValue(true);
+                }
             }
             else
             {
@@ -717,7 +711,11 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 {
                     for (Future<Boolean> resampled : contourEvolutionService.invokeAll(tasks))
                     {
-                        if (resampled.get()) loop.setValue(true);
+                        if (resampled.get())
+                        {
+                            change.setValue(true);
+                            loop.setValue(true);
+                        }
                     }
                 }
                 catch (InterruptedException e)
@@ -734,10 +732,14 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 {
                     throw e;
                 }
+                finally
+                {
+                    tasks.clear();
+                }
             }
         }
         
-        if (region_weight.getValue() > EPSILON) updateRegionInformation(allContours, t);
+        if (change.getValue() && region_weight.getValue() > EPSILON) updateRegionInformation(allContours, t);
     }
     
     private void updateRegionInformation(Collection<ActiveContour> contours, int t)
@@ -748,10 +750,10 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         ArrayList<Callable<Object>> tasks = new ArrayList<Callable<Object>>(contours.size());
         
         final double[] _region_data = region_data.getDataXYAsDouble(0);
-        _region_globl_mask = region_globl_mask.getDataXYAsByte(0);
+        final int sizeX = region_data.getSizeX();
+        final int sizeY = region_data.getSizeY();
+        final int[] _region_globl_mask = region_globl_mask.getDataXYAsInt(0);
         Arrays.fill(_region_globl_mask, (byte) 0);
-        
-        final byte[] _localMask = region_local_mask.getDataXYAsByte(0);
         
         for (final ActiveContour contour : contours)
         {
@@ -759,28 +761,36 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             {
                 public Object call()
                 {
+                    // add the contour to the global mask for background mean measuring
+                    region_globl_mask_graphics.fill(contour.path);
+                    
+                    // compute the interior mean intensity
                     double inSum = 0, inSumSq = 0, inCpt = 0;
+                    Rectangle bounds = contour.path.getBounds();
                     
-                    // create a mask for each object for interior mean measuring
-                    Arrays.fill(_localMask, (byte) 0);
-                    region_local_mask_graphics.fill(contour.path);
+                    int minX = Math.max(bounds.x, 0);
+                    int maxX = Math.min(bounds.x + bounds.width, sizeX);
+                    int minY = Math.max(bounds.y, 0);
+                    int maxY = Math.min(bounds.y + bounds.height, sizeY);
                     
-                    for (int i = 0; i < _localMask.length; i++)
+                    for (int j = minY; j < maxY; j++)
                     {
-                        if (_localMask[i] != 0)
-                        {
-                            double value = _region_data[i];
-                            inSum += value;
-                            inSumSq += value * value;
-                            inCpt++;
-                        }
+                        int offset = j * sizeX + minX;
+                        for (int i = minX; i < maxX; i++, offset++)
+                            if (_region_globl_mask[offset] != 0)
+                            {
+                                if (contour.path.contains(i, j))
+                                {
+                                    double value = _region_data[offset];
+                                    inSum += value;
+                                    inSumSq += value * value;
+                                    inCpt++;
+                                }
+                            }
                     }
                     
                     region_cin.put(contour, inSum / inCpt);
                     region_sin.put(contour, Math.sqrt((inSumSq - (inSum * inSum) / inCpt) / inCpt));
-                    
-                    // add the contour to the global mask for background mean measuring
-                    region_globl_mask_graphics.fill(contour.path);
                     
                     return null;
                 }
