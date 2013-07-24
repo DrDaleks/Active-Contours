@@ -28,7 +28,7 @@ import java.util.Collection;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -224,7 +224,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 trackGroup.setDescription("Active contours (" + new Date().toString() + ")");
                 if (tracking.getValue())
                 {
-                    SwimmingObject object = new SwimmingObject(trackGroup); 
+                    SwimmingObject object = new SwimmingObject(trackGroup);
                     Icy.getMainInterface().getSwimmingPool().add(object);
                 }
             }
@@ -252,16 +252,21 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         for (int t = startT; t <= endT; t++)
         {
             if (inputData.getFirstViewer() != null) inputData.getFirstViewer().setPositionT(t);
+            
+            // initialize contours
             initContours(t, t == startT);
+            
+            if (Thread.currentThread().isInterrupted()) break;
+            
+            // evlove contours on the current image
             evolveContours(t);
-            ThreadUtil.sleep(200);
+            
+            if (Thread.currentThread().isInterrupted()) break;
             
             // store detections and results
             storeResult(t);
             
-            if (Thread.currentThread().isInterrupted()) globalStop = true;
-            
-            if (globalStop) break;
+            if (Thread.currentThread().isInterrupted()) break;
         }
         
         if (getUI() != null)
@@ -376,7 +381,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 roiInput.setValue(roiFromSequence.toArray(new ROI2D[roiFromSequence.size()]));
             }
             
-            ArrayList<Future<?>> tasks = new ArrayList<Future<?>>(roiInput.getValue().length);
+            ArrayList<Callable<Object>> tasks = new ArrayList<Callable<Object>>(roiInput.getValue().length);
             
             for (ROI roi : roiInput.getValue())
             {
@@ -388,9 +393,9 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 
                 final ROI2D roi2d = (ROI2D) roi;
                 
-                tasks.add(contourEvolutionService.submit(new Runnable()
+                tasks.add(new Callable<Object>()
                 {
-                    public void run()
+                    public Object call()
                     {
                         if (roi2d instanceof ROI2DArea)
                         {
@@ -421,25 +426,26 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                             segment.addDetection(contour);
                             trackGroup.addTrackSegment(segment);
                         }
+                        
+                        return null;
                     }
-                }));
+                });
             }
             
             try
             {
-                for (Future<?> task : tasks)
-                    task.get();
+                contourEvolutionService.invokeAll(tasks);
             }
             catch (InterruptedException e)
             {
-                for (Future<?> task : tasks)
-                    task.cancel(true);
-                
+                // restore the interrupted flag
                 Thread.currentThread().interrupt();
+                return;
             }
-            catch (Exception e)
+            catch (RuntimeException e)
             {
-                e.printStackTrace();
+                Thread.currentThread().interrupt();
+                throw e;
             }
         }
         else
@@ -620,13 +626,13 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         }
         else
         {
-            ArrayList<Future<?>> tasks = new ArrayList<Future<?>>(evolvingContours.size());
+            ArrayList<Callable<ActiveContour>> tasks = new ArrayList<Callable<ActiveContour>>(evolvingContours.size());
             
             for (final ActiveContour contour : evolvingContours)
             {
-                tasks.add(contourEvolutionService.submit(new Runnable()
+                tasks.add(new Callable<ActiveContour>()
                 {
-                    public void run()
+                    public ActiveContour call()
                     {
                         if (regul_weight.getValue() > EPSILON) contour.computeInternalForces(regul_weight.getValue());
                         
@@ -641,8 +647,8 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                         
                         if (coupling_flag.getValue())
                         {
-                            // warning: feedback must be computed against ALL contours
-                            // (including those which have already converged)
+                            // Don't move the contours just now: coupling feedback must be computed
+                            // against ALL contours (including those which have already converged)
                             for (ActiveContour otherContour : allContours)
                             {
                                 if (otherContour == null || otherContour == contour) continue;
@@ -655,33 +661,29 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                             // move contours asynchronously
                             contour.move(field, true, contour_timeStep.getValue());
                         }
+                        
+                        return contour;
                     }
-                }));
+                });
             }
             
             try
             {
-                for (Future<?> future : tasks)
-                    future.get();
+                contourEvolutionService.invokeAll(tasks);
             }
             catch (InterruptedException e)
             {
-                for (Future<?> future : tasks)
-                    future.cancel(true);
-                
+                // reset the interrupted flag
                 Thread.currentThread().interrupt();
+                return;
             }
-            catch (Exception e1)
+            
+            if (coupling_flag.getValue())
             {
-                e1.printStackTrace();
+                // motion is synchronous, and can be done now
+                for (ActiveContour contour : evolvingContours)
+                    contour.move(field, true, contour_timeStep.getValue());
             }
-        }
-        
-        if (coupling_flag.getValue())
-        {
-            // motion is synchronous, and can be done now
-            for (ActiveContour contour : evolvingContours)
-                contour.move(field, true, contour_timeStep.getValue());
         }
         
         // refresh the display
@@ -711,27 +713,26 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 for (final ActiveContour contour : evolvingContours)
                     tasks.add(new ReSampler(trackGroup, contour, evolvingContours, allContours));
                 
-                List<Future<Boolean>> results = null;
-                
                 try
                 {
-                    results = contourEvolutionService.invokeAll(tasks);
-                    for (Future<Boolean> f : results)
+                    for (Future<Boolean> resampled : contourEvolutionService.invokeAll(tasks))
                     {
-                        if (f.get()) loop.setValue(true);
+                        if (resampled.get()) loop.setValue(true);
                     }
                 }
                 catch (InterruptedException e)
                 {
-                    if (results != null) for (Future<?> f : results)
-                        f.cancel(true);
-                    
-                    loop.setValue(false);
+                    // reset the interrupted flag
                     Thread.currentThread().interrupt();
+                    return;
                 }
-                catch (Exception e)
+                catch (ExecutionException e)
                 {
-                    e.printStackTrace();
+                    throw new RuntimeException(e);
+                }
+                catch (RuntimeException e)
+                {
+                    throw e;
                 }
             }
         }
@@ -744,7 +745,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         region_cin.clear();
         region_sin.clear();
         
-        ArrayList<Future<?>> tasks = new ArrayList<Future<?>>(contours.size());
+        ArrayList<Callable<Object>> tasks = new ArrayList<Callable<Object>>(contours.size());
         
         final double[] _region_data = region_data.getDataXYAsDouble(0);
         _region_globl_mask = region_globl_mask.getDataXYAsByte(0);
@@ -754,9 +755,9 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         
         for (final ActiveContour contour : contours)
         {
-            tasks.add(meanUpdateService.submit(new Runnable()
+            tasks.add(new Callable<Object>()
             {
-                public void run()
+                public Object call()
                 {
                     double inSum = 0, inSumSq = 0, inCpt = 0;
                     
@@ -780,20 +781,21 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                     
                     // add the contour to the global mask for background mean measuring
                     region_globl_mask_graphics.fill(contour.path);
+                    
+                    return null;
                 }
-            }));
-            
-            try
-            {
-                for (Future<?> future : tasks)
-                    future.get();
-            }
-            catch (InterruptedException e)
-            {
-            }
-            catch (ExecutionException e)
-            {
-            }
+            });
+        }
+        
+        try
+        {
+            meanUpdateService.invokeAll(tasks);
+        }
+        catch (InterruptedException e)
+        {
+            // reset the interrupted flag
+            Thread.currentThread().interrupt();
+            return;
         }
         
         double outSum = 0, outSumSq = 0, outCpt = 0;
