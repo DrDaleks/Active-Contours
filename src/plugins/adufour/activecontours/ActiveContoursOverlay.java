@@ -55,7 +55,7 @@ public class ActiveContoursOverlay extends Overlay
                     if (det.getT() == canvas.getPositionT())
                     {
                         ((ActiveContour) det).paint(g, sequence, canvas);
-                        GraphicsUtil.drawCenteredString(g, "" + id, (int) det.getX(), (int) det.getY(), false);
+                        GraphicsUtil.drawCenteredString(g, "" + id, (int) Math.round(det.getX()), (int) Math.round(det.getY()), false);
                     }
                 }
                 
