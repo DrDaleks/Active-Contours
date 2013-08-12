@@ -613,7 +613,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             
             if (Math.abs(balloon_weight.getValue()) > EPSILON) contour.computeBalloonForces(balloon_weight.getValue());
             
-            contour.move(field, true, contour_timeStep.getValue());
+            contour.move(field, contour_timeStep.getValue());
         }
         else
         {
@@ -650,7 +650,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                         else
                         {
                             // move contours asynchronously
-                            contour.move(field, true, contour_timeStep.getValue());
+                            contour.move(field, contour_timeStep.getValue());
                         }
                         
                         return contour;
@@ -673,7 +673,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             {
                 // motion is synchronous, and can be done now
                 for (ActiveContour contour : evolvingContours)
-                    contour.move(field, true, contour_timeStep.getValue());
+                    contour.move(field, contour_timeStep.getValue());
             }
         }
     }

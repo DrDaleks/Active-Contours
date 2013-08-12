@@ -185,6 +185,8 @@ public class ActiveContour extends Detection
         
         if (!contourOK)
         {
+            points.clear();
+            
             // convert the ROI into a linked list of points
             
             double[] segment = new double[6];
@@ -207,9 +209,25 @@ public class ActiveContour extends Detection
                 // the final one should be a "close" operation, do nothing
             }
             
+            final int nbPoints = points.size();
+            if (modelForces == null || modelForces.length != nbPoints)
+            {
+                modelForces = new Vector3d[nbPoints];
+                contourNormals = new Vector3d[nbPoints];
+                feedbackForces = new Vector3d[nbPoints];
+                
+                for (int i = 0; i < nbPoints; i++)
+                {
+                    modelForces[i] = new Vector3d();
+                    contourNormals[i] = new Vector3d();
+                    feedbackForces[i] = new Vector3d();
+                }
+            }
+            
             updatePath();
             
             area = getAlgebraicArea();
+            
         }
         
         counterClockWise = (area > 0);
@@ -701,7 +719,7 @@ public class ActiveContour extends Detection
         }
     }
     
-    void move(ROI2D field, boolean boundToField, double timeStep)
+    void move(ROI2D field, double timeStep)
     {
         Vector3d force = new Vector3d();
         double maxDisp = contour_resolution.getValue() * timeStep;
@@ -713,7 +731,7 @@ public class ActiveContour extends Detection
             Point3d p = points.get(index);
             
             // apply model forces if p lies within the area of interest
-            if (boundToField && field.contains(p.x, p.y)) force.set(modelForces[index]);
+            if (field != null && field.contains(p.x, p.y)) force.set(modelForces[index]);
             
             // apply feeback forces all the time
             force.add(feedbackForces[index]);
@@ -726,8 +744,6 @@ public class ActiveContour extends Detection
             
             p.add(force);
             
-            setX(getX() + force.x / n);
-            setY(getY() + force.y / n);
             force.set(0, 0, 0);
             
             modelForces[index].set(0, 0, 0);
@@ -1242,6 +1258,7 @@ public class ActiveContour extends Detection
     
     private void updatePath()
     {
+        double x, y;
         synchronized (path)
         {
             path.reset();
@@ -1250,17 +1267,23 @@ public class ActiveContour extends Detection
             
             Point3d p = points.get(0);
             path.moveTo(p.x, p.y);
+            x = p.x;
+            y = p.y;
             
             for (int i = 1; i < nbPoints; i++)
             {
                 p = points.get(i);
                 path.lineTo(p.x, p.y);
+                x += p.x;
+                y += p.y;
                 // TODO
                 // Point3d pp = points.get(i-1);
                 // path.quadTo((pp.x + p.x)/2, (pp.y + p.y)/2, p.x, p.y);
             }
-            
             path.closePath();
+            
+            setX(x / nbPoints);
+            setY(y / nbPoints);
         }
     }
 }
