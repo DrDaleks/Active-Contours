@@ -597,7 +597,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
      */
     private void deformContours(final HashSet<ActiveContour> evolvingContours, final HashSet<ActiveContour> allContours, final ROI2D field)
     {
-        if (evolvingContours.size() == 1)
+        if (evolvingContours.size() == 1 && allContours.size() == 1)
         {
             // no multi-threading needed
             
