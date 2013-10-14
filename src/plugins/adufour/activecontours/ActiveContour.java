@@ -725,13 +725,15 @@ public class ActiveContour extends Detection
         double maxDisp = contour_resolution.getValue() * timeStep;
         
         int n = points.size();
+     
+        if (modelForces == null || modelForces.length != n) return;
         
         for (int index = 0; index < n; index++)
         {
             Point3d p = points.get(index);
             
             // apply model forces if p lies within the area of interest
-            if (field != null && field.contains(p.x, p.y)) force.set(modelForces[index]);
+            if (field != null && field.contains(p.x, p.y) && modelForces[index] != null) force.set(modelForces[index]);
             
             // apply feeback forces all the time
             force.add(feedbackForces[index]);
