@@ -1234,7 +1234,7 @@ public class ActiveContour extends Detection
     @Override
     public void paint(Graphics2D g, Sequence sequence, IcyCanvas canvas)
     {
-        if (getT() != canvas.getPositionT() || !enabled) return;
+        if (getT() != canvas.getPositionT() || !enabled || g == null) return;
         
         float fontSize = (float) canvas.canvasToImageLogDeltaX(30);
         g.setFont(new Font("Trebuchet MS", Font.BOLD, 10).deriveFont(fontSize));
