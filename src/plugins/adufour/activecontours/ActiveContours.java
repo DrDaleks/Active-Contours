@@ -279,7 +279,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 addSequence(outputSequence_rois);
             }
             
-            if (tracking.getValue())
+            if (tracking.getValue() && !isHeadLess())
             {
                 ThreadUtil.invokeLater(new Runnable()
                 {
