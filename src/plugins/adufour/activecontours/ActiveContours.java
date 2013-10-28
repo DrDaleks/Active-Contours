@@ -113,8 +113,8 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     private double                         region_cout;
     private double                         region_sout;
     
-    private VarROIArray                    roiInput                = new VarROIArray("input ROI");
-    private VarROIArray                    roiOutput               = new VarROIArray("Regions of interest");
+    public VarROIArray                     roiInput                = new VarROIArray("input ROI");
+    public VarROIArray                     roiOutput               = new VarROIArray("Regions of interest");
     
     private boolean                        globalStop;
     
@@ -299,64 +299,70 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         }
     }
     
+    public boolean fastInit = false;
+    
     private void initContours(final int t, boolean isFirstImage)
     {
-        // 1) Initialize the edge data
-        
         Viewer v = inputData.getFirstViewer();
         
         int z = v == null ? 0 : inputData.getFirstViewer().getPositionZ();
         
-        IcyBufferedImage edgeInputData = inputData.getSizeC() > 1 ? inputData.getImage(t, z, edge_c.getValue()) : inputData.getImage(t, z);
+        // 1) Initialize the edge data
         
-        if (edgeInputData == null) throw new IcyHandledException("The edge input data is invalid. Make sure the selected channel is valid.");
-        
-        Sequence gradient = Kernels1D.GRADIENT.toSequence();
-        Sequence gaussian = Kernels1D.CUSTOM_GAUSSIAN.createGaussianKernel1D(0.5).toSequence();
-        
-        Sequence gradX = new Sequence(IcyBufferedImageUtil.convertToType(edgeInputData, DataType.DOUBLE, true, true));
-        
-        // smooth the signal first
-        try
+        if (!fastInit || edge_weight.getValue() > 0.0)
         {
-            Convolution1D.convolve(gradX, gaussian, gaussian, null);
+            IcyBufferedImage edgeInputData = inputData.getSizeC() > 1 ? inputData.getImage(t, z, edge_c.getValue()) : inputData.getImage(t, z);
+            
+            if (edgeInputData == null) throw new IcyHandledException("The edge input data is invalid. Make sure the selected channel is valid.");
+            
+            Sequence gradient = Kernels1D.GRADIENT.toSequence();
+            Sequence gaussian = Kernels1D.CUSTOM_GAUSSIAN.createGaussianKernel1D(0.5).toSequence();
+            
+            Sequence gradX = new Sequence(IcyBufferedImageUtil.convertToType(edgeInputData, DataType.DOUBLE, true, true));
+            
+            // smooth the signal first
+            try
+            {
+                Convolution1D.convolve(gradX, gaussian, gaussian, null);
+            }
+            catch (ConvolutionException e)
+            {
+                throw new EzException("Cannot smooth the signal: " + e.getMessage(), true);
+            }
+            
+            // clone into gradY
+            Sequence gradY = SequenceUtil.getCopy(gradX);
+            
+            // compute the gradient in each direction
+            try
+            {
+                Convolution1D.convolve(gradX, gradient, null, null);
+                Convolution1D.convolve(gradY, null, gradient, null);
+            }
+            catch (ConvolutionException e)
+            {
+                throw new EzException("Cannot compute the gradient information: " + e.getMessage(), true);
+            }
+            
+            edgeDataX = gradX.getFirstImage();
+            edgeDataY = gradY.getFirstImage();
         }
-        catch (ConvolutionException e)
-        {
-            throw new EzException("Cannot smooth the signal: " + e.getMessage(), true);
-        }
-        
-        // clone into gradY
-        Sequence gradY = SequenceUtil.getCopy(gradX);
-        
-        // compute the gradient in each direction
-        try
-        {
-            Convolution1D.convolve(gradX, gradient, null, null);
-            Convolution1D.convolve(gradY, null, gradient, null);
-        }
-        catch (ConvolutionException e)
-        {
-            throw new EzException("Cannot compute the gradient information: " + e.getMessage(), true);
-        }
-        
-        edgeDataX = gradX.getFirstImage();
-        edgeDataY = gradY.getFirstImage();
         
         // 2) initialize the region data
-        
-        IcyBufferedImage regionInputData = inputData.getSizeC() > 1 ? inputData.getImage(t, z, region_c.getValue()) : inputData.getImage(t, z);
-        
-        if (regionInputData == null) throw new IcyHandledException("The region input data is invalid.  Make sure the selected channel is valid.");
-        
-        region_data = IcyBufferedImageUtil.convertToType(regionInputData, DataType.DOUBLE, true, true);
-        
-        if (isFirstImage)
+        if (!fastInit || region_weight.getValue() > 0.0)
         {
-            region_globl_mask = new IcyBufferedImage(region_data.getWidth(), region_data.getHeight(), 1, DataType.UINT);
-            region_globl_mask_graphics = region_globl_mask.createGraphics();
+            IcyBufferedImage regionInputData = inputData.getSizeC() > 1 ? inputData.getImage(t, z, region_c.getValue()) : inputData.getImage(t, z);
+            
+            if (regionInputData == null) throw new IcyHandledException("The region input data is invalid.  Make sure the selected channel is valid.");
+            
+            region_data = IcyBufferedImageUtil.convertToType(regionInputData, DataType.DOUBLE, true, true);
+            
+            if (isFirstImage)
+            {
+                region_globl_mask = new IcyBufferedImage(region_data.getWidth(), region_data.getHeight(), 1, DataType.UINT);
+                region_globl_mask_graphics = region_globl_mask.createGraphics();
+            }
         }
-        
         // 1) Initialize the contours
         
         if (isFirstImage)
@@ -459,7 +465,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         }
     }
     
-    private void evolveContours(final int t)
+    public void evolveContours(final int t)
     {
         // retrieve the contours on the current frame and store them in currentContours
         final HashSet<ActiveContour> allContours = new HashSet<ActiveContour>(trackGroup.getTrackSegmentList().size());
@@ -595,7 +601,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
      * @param evolvingContours
      * @param allContours
      */
-    private void deformContours(final HashSet<ActiveContour> evolvingContours, final HashSet<ActiveContour> allContours, final ROI2D field)
+    public void deformContours(final HashSet<ActiveContour> evolvingContours, final HashSet<ActiveContour> allContours, final ROI2D field)
     {
         if (evolvingContours.size() == 1 && allContours.size() == 1)
         {
