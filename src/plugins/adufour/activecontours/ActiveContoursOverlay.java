@@ -7,7 +7,6 @@ import icy.util.GraphicsUtil;
 
 import java.awt.Graphics2D;
 import java.util.ArrayList;
-import java.util.HashMap;
 
 import plugins.fab.trackmanager.TrackGroup;
 import plugins.fab.trackmanager.TrackSegment;
@@ -15,15 +14,7 @@ import plugins.nchenouard.spot.Detection;
 
 public class ActiveContoursOverlay extends Overlay
 {
-    private HashMap<Integer, ArrayList<ActiveContour>> contoursMap;
-    
-    private TrackGroup                                 trackGroup;
-    
-    public ActiveContoursOverlay(HashMap<Integer, ArrayList<ActiveContour>> contours)
-    {
-        super("Active contours");
-        contoursMap = contours;
-    }
+    private TrackGroup trackGroup;
     
     public ActiveContoursOverlay(TrackGroup trackGroup)
     {
@@ -34,33 +25,23 @@ public class ActiveContoursOverlay extends Overlay
     @Override
     public void paint(Graphics2D g, Sequence sequence, IcyCanvas canvas)
     {
-        int t = canvas.getPositionT();
+        ArrayList<TrackSegment> segments = new ArrayList<TrackSegment>(trackGroup.getTrackSegmentList());
         
-        if (trackGroup == null)
+        int id = 1;
+        for (TrackSegment segment : segments)
         {
-            if (contoursMap.containsKey(t)) for (ActiveContour contour : contoursMap.get(t))
-                contour.paint(g, sequence, canvas);
-        }
-        else
-        {
-            ArrayList<TrackSegment> segments = new ArrayList<TrackSegment>(trackGroup.getTrackSegmentList());
+            ArrayList<Detection> detections = new ArrayList<Detection>(segment.getDetectionList());
             
-            int id = 1;
-            for (TrackSegment segment : segments)
+            for (Detection det : detections)
             {
-                ArrayList<Detection> detections = new ArrayList<Detection>(segment.getDetectionList());
-                
-                for (Detection det : detections)
+                if (det.getT() == canvas.getPositionT())
                 {
-                    if (det.getT() == canvas.getPositionT())
-                    {
-                        ((ActiveContour) det).paint(g, sequence, canvas);
-                        GraphicsUtil.drawCenteredString(g, "" + id, (int) Math.round(det.getX()), (int) Math.round(det.getY()), false);
-                    }
+                    ((ActiveContour) det).paint(g, sequence, canvas);
+                    GraphicsUtil.drawCenteredString(g, "" + id, (int) Math.round(det.getX()), (int) Math.round(det.getY()), false);
                 }
-                
-                id++;
             }
+            
+            id++;
         }
     }
 }
