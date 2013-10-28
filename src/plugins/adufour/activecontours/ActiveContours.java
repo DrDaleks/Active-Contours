@@ -1,8 +1,6 @@
 package plugins.adufour.activecontours;
 
-import icy.gui.viewer.Viewer;
 import icy.image.IcyBufferedImage;
-import icy.image.IcyBufferedImageUtil;
 import icy.main.Icy;
 import icy.painter.Overlay.OverlayPriority;
 import icy.roi.BooleanMask2D;
@@ -21,7 +19,6 @@ import icy.type.DataType;
 import icy.util.ShapeUtil.ShapeOperation;
 import icy.util.StringUtil;
 
-import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -70,6 +67,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     
     public final EzVarSequence             input                   = new EzVarSequence("Input");
     private Sequence                       inputData;
+    private Sequence                       currentFrame_float;
     
     public final EzVarDouble               init_isovalue           = new EzVarDouble("Isovalue", 1, 0, 1000000, 0.01);
     
@@ -103,9 +101,9 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     public final EzVarBoolean              tracking                = new EzVarBoolean("Track objects over time", false);
     
     private final Sequence                 edgeData                = new Sequence("Edge information");
-    private Sequence                       currentFrame_float;
     private final Sequence                 contourMask_buffer      = new Sequence("Mask data");
     
+    private Sequence                       region_data;
     private HashMap<ActiveContour, Double> region_cin              = new HashMap<ActiveContour, Double>(0);
     private double                         region_cout;
     
@@ -299,22 +297,28 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     
     private void initContours(final int t, boolean isFirstImage)
     {
-        Viewer v = inputData.getFirstViewer();
-        
-        int z = v == null ? 0 : inputData.getFirstViewer().getPositionZ();
+        // Viewer v = inputData.getFirstViewer();
+        //
+        // int z = (v == null) ? 0 : inputData.getFirstViewer().getPositionZ();
         
         currentFrame_float = SequenceUtil.convertToType(SequenceUtil.extractFrame(inputData, t), DataType.FLOAT, true, true);
         
         // 1) Initialize the edge data
         {
-            Sequence edgeInputData = SequenceUtil.getCopy(inputData.getSizeC() == 1 ? currentFrame_float : SequenceUtil.extractChannel(currentFrame_float, edge_c.getValue()));
+            if (edge_c.getValue() >= currentFrame_float.getSizeC())
+            {
+                throw new IcyHandledException("The selected edge channel is invalid.");
+            }
             
-            if (edgeInputData == null) throw new IcyHandledException("The edge input data is invalid. Make sure the selected channel is valid.");
+            if (region_c.getValue() >= currentFrame_float.getSizeC())
+            {
+                throw new IcyHandledException("The selected region channel is valid.");
+            }
+            
+            Sequence gradX = SequenceUtil.getCopy(inputData.getSizeC() == 1 ? currentFrame_float : SequenceUtil.extractChannel(currentFrame_float, edge_c.getValue()));
             
             Sequence gradient = Kernels1D.GRADIENT.toSequence();
             Sequence gaussian = Kernels1D.CUSTOM_GAUSSIAN.createGaussianKernel1D(0.5).toSequence();
-            
-            // TODO  Sequence gradX = new Sequence(IcyBufferedImageUtil.convertToType(edgeInputData, DataType.DOUBLE, true, true));
             
             // smooth the signal first
             try
@@ -328,50 +332,45 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             
             // clone into gradY
             Sequence gradY = SequenceUtil.getCopy(gradX);
+            Sequence gradZ = (inputData.getSizeZ() == 1) ? null : SequenceUtil.getCopy(gradX);
             
             // compute the gradient in each direction
             try
             {
                 Convolution1D.convolve(gradX, gradient, null, null);
                 Convolution1D.convolve(gradY, null, gradient, null);
+                if (gradZ != null) Convolution1D.convolve(gradZ, null, null, gradient);
             }
             catch (ConvolutionException e)
             {
                 throw new EzException("Cannot compute the gradient information: " + e.getMessage(), true);
             }
             
-            ArrayList<BufferedImage> edgeDataXY = new ArrayList<BufferedImage>(2);
-            edgeDataXY.add(gradX.getFirstImage());
-            edgeDataXY.add(gradY.getFirstImage());
-            
-            edgeData.setImage(0, 0, IcyBufferedImage.createFrom(edgeDataXY));
+            // combine the edge data as multi-channel data
+            if (gradZ == null)
+            {
+                float[][] edgeSlice = new float[][] { gradX.getDataXYAsFloat(0, 0, 0), gradY.getDataXYAsFloat(0, 0, 0) };
+                edgeData.setImage(0, 0, new IcyBufferedImage(inputData.getWidth(), inputData.getHeight(), edgeSlice));
+            }
+            else for (int z = 0; z < edgeData.getSizeZ(); z++)
+            {
+                float[][] edgeSlice = new float[][] { gradX.getDataXYAsFloat(0, z, 0), gradY.getDataXYAsFloat(0, z, 0), gradZ.getDataXYAsFloat(0, z, 0) };
+                edgeData.setImage(0, z, new IcyBufferedImage(inputData.getWidth(), inputData.getHeight(), edgeSlice));
+            }
         }
+        
         // 2) initialize the region data
         {
-            Sequence regionInputData = SequenceUtil.extractFrame(inputData, t);
-            
-            if (inputData.getSizeC() > 1)
-            {
-                regionInputData = SequenceUtil.extractChannel(regionInputData, region_c.getValue());
-            }
-            
-            if (regionInputData == null) throw new IcyHandledException("The region input data is invalid.  Make sure the selected channel is valid.");
-            
-            currentFrame_float = SequenceUtil.convertToType(SequenceUtil.extractFrame(inputData, t), DataType.FLOAT, true, true);
+            region_data = (inputData.getSizeC() == 1) ? currentFrame_float : SequenceUtil.extractChannel(currentFrame_float, region_c.getValue());
             
             // initialize the mask buffer (used to calculate average intensities inside/outside
-            if (isFirstImage) for (int slice = 0; slice < inputData.getSizeZ(); slice++)
-                contourMask_buffer.setImage(0, slice, new IcyBufferedImage(inputData.getWidth(), inputData.getHeight(), 1, DataType.UINT));
+            if (isFirstImage) for (int z = 0; z < inputData.getSizeZ(); z++)
+                contourMask_buffer.setImage(0, z, new IcyBufferedImage(inputData.getWidth(), inputData.getHeight(), 1, DataType.UINT));
         }
-        // 3) Initialize the contours
         
+        // 3) Initialize the contours
         if (isFirstImage)
         {
-            // // remove existing ActiveContourPainters and track segments if any
-            // for (Painter p : inSeq.getPainters())
-            // if (p instanceof ActiveContoursPainter)
-            // inSeq.removePainter(p);
-            
             if (roiInput.getValue().length == 0)
             {
                 if (isHeadLess()) throw new VarException("Active contours: no input ROI");
@@ -561,7 +560,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             
             if (regul_weight.getValue() > EPSILON) contour.computeInternalForces(regul_weight.getValue());
             
-            if (region_weight.getValue() > EPSILON) contour.computeRegionForces(currentFrame_float, region_weight.getValue(), region_cin.get(contour), region_cout);
+            if (region_weight.getValue() > EPSILON) contour.computeRegionForces(region_data, region_weight.getValue(), region_cin.get(contour), region_cout);
             
             if (axis_weight.getValue() > EPSILON) contour.computeAxisForces(axis_weight.getValue());
             
@@ -583,7 +582,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                         
                         if (Math.abs(edge_weight.getValue()) > EPSILON) contour.computeEdgeForces(edge_weight.getValue(), edgeData);
                         
-                        if (region_weight.getValue() > EPSILON) contour.computeRegionForces(currentFrame_float, region_weight.getValue(), region_cin.get(contour), region_cout);
+                        if (region_weight.getValue() > EPSILON) contour.computeRegionForces(region_data, region_weight.getValue(), region_cin.get(contour), region_cout);
                         
                         if (axis_weight.getValue() > EPSILON) contour.computeAxisForces(axis_weight.getValue());
                         
@@ -699,6 +698,11 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     {
         region_cin.clear();
         
+        for (int z = 0; z < inputData.getSizeZ(); z++)
+        {
+            Arrays.fill(contourMask_buffer.getDataXYAsInt(0, z, 0), 0);
+        }
+        
         ArrayList<Future<?>> tasks = new ArrayList<Future<?>>(contours.size());
         
         for (final ActiveContour contour : contours)
@@ -706,7 +710,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             {
                 public void run()
                 {
-                    region_cin.put(contour, contour.computeAverageIntensity(currentFrame_float, contourMask_buffer));
+                    region_cin.put(contour, contour.computeAverageIntensity(region_data, contourMask_buffer));
                 }
             }));
         
@@ -726,7 +730,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             throw new RuntimeException(e);
         }
         
-        double outSum = 0, outSumSq = 0, outCpt = 0;
+        double outSum = 0, outCpt = 0;
         for (int z = 0; z < contourMask_buffer.getSizeZ(); z++)
         {
             int[] _mask = contourMask_buffer.getDataXYAsInt(0, z, 0);
