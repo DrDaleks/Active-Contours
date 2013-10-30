@@ -2,12 +2,12 @@ package plugins.adufour.activecontours;
 
 import icy.image.IcyBufferedImage;
 import icy.main.Icy;
+import icy.painter.Overlay;
 import icy.painter.Overlay.OverlayPriority;
 import icy.roi.BooleanMask2D;
 import icy.roi.ROI;
 import icy.roi.ROI2D;
-import icy.roi.ROI2DArea;
-import icy.roi.ROI2DRectangle;
+import icy.roi.ROIUtil;
 import icy.sequence.DimensionId;
 import icy.sequence.Sequence;
 import icy.sequence.SequenceUtil;
@@ -16,7 +16,7 @@ import icy.system.IcyHandledException;
 import icy.system.SystemUtil;
 import icy.system.thread.ThreadUtil;
 import icy.type.DataType;
-import icy.util.ShapeUtil.ShapeOperation;
+import icy.util.ShapeUtil.BooleanOperator;
 import icy.util.StringUtil;
 
 import java.util.ArrayList;
@@ -57,6 +57,8 @@ import plugins.adufour.vars.util.VarException;
 import plugins.fab.trackmanager.TrackGroup;
 import plugins.fab.trackmanager.TrackManager;
 import plugins.fab.trackmanager.TrackSegment;
+import plugins.kernel.roi.roi2d.ROI2DArea;
+import plugins.kernel.roi.roi2d.ROI2DRectangle;
 import plugins.nchenouard.spot.Detection;
 
 public class ActiveContours extends EzPlug implements EzStoppable, Block
@@ -114,7 +116,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     
     private TrackGroup                     trackGroup;
     
-    private ActiveContoursOverlay          painter;
+    private ActiveContoursOverlay          overlay;
     
     private ExecutorService                contourEvolutionService = Executors.newFixedThreadPool(SystemUtil.getAvailableProcessors());
     private ExecutorService                meanUpdateService       = Executors.newFixedThreadPool(SystemUtil.getAvailableProcessors());
@@ -228,12 +230,12 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         });
         
         // replace any ActiveContours Painter object on the sequence by ours
-        for (icy.painter.Painter painter : inputData.getPainters())
-            if (painter instanceof ActiveContoursOverlay) inputData.removePainter(painter);
+        for (Overlay overlay : inputData.getOverlays())
+            if (overlay instanceof ActiveContoursOverlay) inputData.removeOverlay(overlay);
         
-        painter = new ActiveContoursOverlay(trackGroup);
-        painter.setPriority(OverlayPriority.TOPMOST);
-        inputData.addPainter(painter);
+        overlay = new ActiveContoursOverlay(trackGroup);
+        overlay.setPriority(OverlayPriority.TOPMOST);
+        inputData.addOverlay(overlay);
         
         if (getUI() != null)
         {
@@ -448,6 +450,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             {
                 // stopExecution();
                 if (e.getCause() instanceof EzException) throw (EzException) e.getCause();
+                e.printStackTrace();
                 throw new RuntimeException(e.getCause());
             }
         }
@@ -484,13 +487,13 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         
         Sequence boundSource = evolution_bounds.getValue();
         
-        if (boundSource == null || !boundSource.getDimension().equals(inputData.getDimension()) || boundSource.getROI2Ds().size() == 0)
+        if (boundSource == null || !boundSource.getDimension2D().equals(inputData.getDimension2D()) || boundSource.getROI2Ds().size() == 0)
         {
             field = new ROI2DRectangle(0, 0, inputData.getWidth(), inputData.getHeight());
         }
         else
         {
-            field = ROI2D.merge(boundSource.getROI2Ds().toArray(new ROI2D[0]), ShapeOperation.OR);
+            field = ROIUtil.merge(boundSource.getROIs(), BooleanOperator.OR);
         }
         
         int nbConvergedContours = 0;
@@ -537,7 +540,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             
             if (Thread.currentThread().isInterrupted()) globalStop = true;
             
-            painter.painterChanged();
+            overlay.painterChanged();
         }
     }
     
@@ -787,7 +790,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     @Override
     public void clean()
     {
-        if (inputData != null) inputData.removePainter(painter);
+        if (inputData != null) inputData.removeOverlay(overlay);
         
         // contoursMap.clear();
         // contours.clear();

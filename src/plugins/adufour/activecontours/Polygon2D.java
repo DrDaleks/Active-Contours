@@ -4,11 +4,6 @@ import icy.canvas.IcyCanvas;
 import icy.image.IcyBufferedImage;
 import icy.roi.ROI;
 import icy.roi.ROI2D;
-import icy.roi.ROI2DArea;
-import icy.roi.ROI2DEllipse;
-import icy.roi.ROI2DPolygon;
-import icy.roi.ROI2DRectangle;
-import icy.roi.ROI2DShape;
 import icy.sequence.Sequence;
 import icy.type.DataType;
 
@@ -30,6 +25,11 @@ import javax.vecmath.Vector3d;
 import plugins.adufour.ezplug.EzException;
 import plugins.adufour.ezplug.EzVarDouble;
 import plugins.adufour.ezplug.EzVarInteger;
+import plugins.kernel.roi.roi2d.ROI2DArea;
+import plugins.kernel.roi.roi2d.ROI2DEllipse;
+import plugins.kernel.roi.roi2d.ROI2DPolygon;
+import plugins.kernel.roi.roi2d.ROI2DRectangle;
+import plugins.kernel.roi.roi2d.ROI2DShape;
 
 public class Polygon2D extends ActiveContour
 {
@@ -1095,7 +1095,7 @@ public class Polygon2D extends ActiveContour
         int cubeHeight = grid * bounds.width;
         int cubeDiag = cubeWidth + cubeHeight;
         
-        boolean[] mask = roi.getBooleanMask(roi.getBounds());
+        boolean[] mask = roi.getBooleanMask(roi.getBounds(), true);
         // erase first line and first row to ensure closed contours
         java.util.Arrays.fill(mask, 0, bounds.width - 1, false);
         for (int o = 0; o < mask.length; o += bounds.width)
