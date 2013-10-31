@@ -396,7 +396,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 roiInput.setValue(roiFromSequence.toArray(new ROI2D[roiFromSequence.size()]));
             }
             
-            ArrayList<Future<Object>> tasks = new ArrayList<Future<Object>>(roiInput.getValue().length);
+            ArrayList<Future<?>> tasks = new ArrayList<Future<?>>(roiInput.getValue().length);
             
             for (ROI roi : roiInput.getValue())
             {
@@ -408,9 +408,9 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 
                 final ROI2D roi2d = (ROI2D) roi;
                 
-                tasks.add(multiThreadService.submit(new Callable<Object>()
+                Runnable initializer = new Runnable()
                 {
-                    public Object call()
+                    public void run()
                     {
                         if (roi2d instanceof ROI2DArea)
                         {
@@ -457,15 +457,15 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                                 region_cin.put(contour, 0.0);
                             }
                         }
-                        
-                        return null;
                     }
-                }));
+                };
+                
+                tasks.add(multiThreadService.submit(initializer));
             }
             
             try
             {
-                for (Future<Object> future : tasks)
+                for (Future<?> future : tasks)
                     future.get();
             }
             catch (InterruptedException e)
