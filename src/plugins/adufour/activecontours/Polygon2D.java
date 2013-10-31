@@ -88,6 +88,8 @@ public class Polygon2D extends ActiveContour
     
     private boolean          counterClockWise;
     
+    private Graphics2D       bufferGraphics;
+    
     protected Polygon2D(ActiveContours owner, EzVarDouble contour_resolution, EzVarInteger contour_minArea, SlidingWindow convergenceWindow)
     {
         super(owner, contour_resolution, contour_minArea, convergenceWindow);
@@ -425,14 +427,16 @@ public class Polygon2D extends ActiveContour
         IcyBufferedImage data = imageData_float.getImage(0, 0);
         float[] _data = data.getDataXYAsFloat(0);
         
-        IcyBufferedImage buffer = buffer_data.getFirstImage();
-        int[] _buffer = buffer.getDataXYAsInt(0);
+        IcyBufferedImage buffer = buffer_data.getImage(0, 0);
+        byte[] _buffer = buffer.getDataXYAsByte(0);
         
         int sizeX = data.getWidth();
         int sizeY = data.getHeight();
         
+        if (bufferGraphics == null) bufferGraphics = buffer.createGraphics();
+        
         // fill the contour contents in the buffer
-        buffer.createGraphics().fill(path);
+        bufferGraphics.fill(path);
         
         // compute the interior mean intensity
         double inSum = 0, inCpt = 0;
@@ -461,7 +465,7 @@ public class Polygon2D extends ActiveContour
             }
         }
         
-        return inSum / inCpt;
+        return inCpt == 0 ? 0.0 : inSum / inCpt;
     }
     
     /**
@@ -781,31 +785,31 @@ public class Polygon2D extends ActiveContour
         switch (order)
         {
         
-            case 0: // number of points
+        case 0: // number of points
+        {
+            return points.size();
+        }
+        
+        case 1: // perimeter
+        {
+            Point3d p1;
+            Point3d p2;
+            double l = 0.0;
+            int size = points.size();
+            for (int i = 0; i < size; i++)
             {
-                return points.size();
+                p1 = points.get(i);
+                p2 = points.get((i + 1) % size);
+                l += Math.abs(p1.distance(p2));
             }
-            
-            case 1: // perimeter
-            {
-                Point3d p1;
-                Point3d p2;
-                double l = 0.0;
-                int size = points.size();
-                for (int i = 0; i < size; i++)
-                {
-                    p1 = points.get(i);
-                    p2 = points.get((i + 1) % size);
-                    l += Math.abs(p1.distance(p2));
-                }
-                return l;
-            }
-            case 2: // area
-            {
-                return Math.abs(getAlgebraicArea());
-            }
-            default:
-                throw new UnsupportedOperationException("Dimension " + order + " not implemented");
+            return l;
+        }
+        case 2: // area
+        {
+            return Math.abs(getAlgebraicArea());
+        }
+        default:
+            throw new UnsupportedOperationException("Dimension " + order + " not implemented");
         }
     }
     
@@ -905,8 +909,8 @@ public class Polygon2D extends ActiveContour
         
         if (modelForces == null || modelForces.length != n) return;
         
-        x = 0;
-        y = 0;
+        double x = 0;
+        double y = 0;
         
         for (int index = 0; index < n; index++)
         {
@@ -926,8 +930,8 @@ public class Polygon2D extends ActiveContour
             
             p.add(force);
             
-            x += force.x;
-            y += force.y;
+            x += p.x;
+            y += p.y;
             
             force.set(0, 0, 0);
             
@@ -935,8 +939,8 @@ public class Polygon2D extends ActiveContour
             feedbackForces[index].set(0, 0, 0);
         }
         
-        x /= n;
-        y /= n;
+        setX(x / n);
+        setY(y / n);
         
         normalsNeedUpdate = true;
         boundingSphereNeedsUpdate = true;
