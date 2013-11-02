@@ -87,8 +87,6 @@ public class Polygon2D extends ActiveContour
     
     private boolean          counterClockWise;
     
-    private Graphics2D       bufferGraphics;
-    
     protected Polygon2D(ActiveContours owner, EzVarDouble contour_resolution, EzVarInteger contour_minArea, SlidingWindow convergenceWindow)
     {
         super(owner, contour_resolution, contour_minArea, convergenceWindow);
@@ -431,17 +429,9 @@ public class Polygon2D extends ActiveContour
         
         int sizeX = data.getWidth();
         int sizeY = data.getHeight();
-        
-        if (bufferGraphics == null)
-        {
-            bufferGraphics = buffer.createGraphics();
-        }
-        
-        // fill the contour contents in the buffer
+                
         Rectangle bounds = path.getBounds();
-        bufferGraphics.setClip(bounds);
-        bufferGraphics.fill(path);
-        
+
         // compute the interior mean intensity
         double inSum = 0, inCpt = 0;
         
@@ -450,18 +440,16 @@ public class Polygon2D extends ActiveContour
         int minY = Math.max(bounds.y, 0);
         int maxY = Math.min(bounds.y + bounds.height, sizeY);
         
-        for (int j = minY, offset = j*sizeX+minX; j < maxY; j++)
+        for (int j = minY, offset = j * sizeX + minX; j < maxY; j++)
         {
             for (int i = minX; i < maxX; i++, offset++)
             {
-                if (_buffer[offset] != 0)
+                if (path.contains(i, j))
                 {
-                    if (path.contains(i, j))
-                    {
-                        double value = _data[offset];
-                        inSum += value;
-                        inCpt++;
-                    }
+                    _buffer[offset] = 1;
+                    double value = _data[offset];
+                    inSum += value;
+                    inCpt++;
                 }
             }
             offset += sizeX - minX - 1;
@@ -685,7 +673,7 @@ public class Polygon2D extends ActiveContour
         updateNormalsIfNeeded();
         
         Polygon2D p2 = (Polygon2D) target;
-        Rectangle r = p2.bufferGraphics.getClipBounds();
+        Rectangle r = p2.path.getBounds();
         
         double penetration = 0;
         
@@ -695,8 +683,8 @@ public class Polygon2D extends ActiveContour
         for (Point3d p : points)
         {
             Vector3d feedbackForce = feedbackForces[index];
-
-            if (r.contains(p.x, p.y) && p2.path.contains(p.x, p.y))
+            
+            if (r.contains(p.x, p.y))
             {
                 tests++;
                 
