@@ -118,7 +118,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     
     private ActiveContoursOverlay          overlay;
     
-    private ExecutorService                multiThreadService    = Executors.newFixedThreadPool(SystemUtil.getAvailableProcessors() * 2);
+    private ExecutorService                multiThreadService    = Executors.newFixedThreadPool(SystemUtil.getAvailableProcessors());
     
     public TrackGroup getTrackGroup()
     {
@@ -311,6 +311,8 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         // Viewer v = inputData.getFirstViewer();
         //
         // int z = (v == null) ? 0 : inputData.getFirstViewer().getPositionZ();
+        region_cin.clear();
+        region_cout = 0.0;
         
         currentFrame_float = SequenceUtil.convertToType(SequenceUtil.extractFrame(inputData, t), DataType.FLOAT, true, true);
         
@@ -422,8 +424,8 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                             for (BooleanMask2D comp : components)
                             {
                                 ROI2DArea roi = new ROI2DArea(comp);
-                                final ActiveContour contour = new Polygon2D(ActiveContours.this, contour_resolution, contour_minArea, new SlidingWindow(convergence_winSize
-                                        .getValue()), roi);
+                                final ActiveContour contour = new Polygon2D(ActiveContours.this, contour_resolution, contour_minArea, new SlidingWindow(
+                                        convergence_winSize.getValue()), roi);
                                 contour.setX(roi.getBounds2D().getCenterX());
                                 contour.setY(roi.getBounds2D().getCenterY());
                                 contour.setT(t);
@@ -583,6 +585,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
      */
     private void deformContours(final HashSet<ActiveContour> evolvingContours, final HashSet<ActiveContour> allContours, final ROI field)
     {
+        
         if (evolvingContours.size() == 1 && allContours.size() == 1)
         {
             // no multi-threading needed
@@ -603,23 +606,29 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         }
         else
         {
-            ArrayList<Callable<ActiveContour>> tasks = new ArrayList<Callable<ActiveContour>>(evolvingContours.size());
+            final double wRegul = regul_weight.getValue();
+            final double wEdge = edge_weight.getValue();
+            final double wRegion = region_weight.getValue();
+            final double wAxis = axis_weight.getValue();
+            final double wBall = balloon_weight.getValue();
+            
+            ArrayList<Future<ActiveContour>> tasks = new ArrayList<Future<ActiveContour>>(evolvingContours.size());
             
             for (final ActiveContour contour : evolvingContours)
             {
-                tasks.add(new Callable<ActiveContour>()
+                tasks.add(multiThreadService.submit(new Callable<ActiveContour>()
                 {
                     public ActiveContour call()
                     {
-                        if (regul_weight.getValue() > EPSILON) contour.computeInternalForces(regul_weight.getValue());
+                        if (wRegul > EPSILON) contour.computeInternalForces(wRegul);
                         
-                        if (Math.abs(edge_weight.getValue()) > EPSILON) contour.computeEdgeForces(edge_weight.getValue(), edgeData);
+                        if (Math.abs(wEdge) > EPSILON) contour.computeEdgeForces(wEdge, edgeData);
                         
-                        if (region_weight.getValue() > EPSILON) contour.computeRegionForces(region_data, region_weight.getValue(), region_cin.get(contour), region_cout);
+                        if (wRegion > EPSILON) contour.computeRegionForces(region_data, wRegion, region_cin.get(contour), region_cout);
                         
-                        if (axis_weight.getValue() > EPSILON) contour.computeAxisForces(axis_weight.getValue());
+                        if (wAxis > EPSILON) contour.computeAxisForces(wAxis);
                         
-                        if (Math.abs(balloon_weight.getValue()) > EPSILON) contour.computeBalloonForces(balloon_weight.getValue());
+                        if (Math.abs(wBall) > EPSILON) contour.computeBalloonForces(wBall);
                         
                         if (coupling_flag.getValue())
                         {
@@ -640,12 +649,12 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                         
                         return contour;
                     }
-                });
+                }));
             }
             
             try
             {
-                for (Future<ActiveContour> future : multiThreadService.invokeAll(tasks))
+                for (Future<ActiveContour> future : tasks)
                     future.get();
             }
             catch (InterruptedException e)
@@ -693,14 +702,14 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             }
             else
             {
-                ArrayList<ReSampler> tasks = new ArrayList<ReSampler>(evolvingContours.size());
+                ArrayList<Future<Boolean>> tasks = new ArrayList<Future<Boolean>>(evolvingContours.size());
                 
                 for (final ActiveContour contour : evolvingContours)
-                    tasks.add(new ReSampler(trackGroup, contour, evolvingContours, allContours));
+                    tasks.add(multiThreadService.submit(new ReSampler(trackGroup, contour, evolvingContours, allContours)));
                 
                 try
                 {
-                    for (Future<Boolean> resampled : multiThreadService.invokeAll(tasks))
+                    for (Future<Boolean> resampled : tasks)
                     {
                         if (resampled.get())
                         {
@@ -729,13 +738,13 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 }
             }
         }
-        
-        if (change.getValue() && region_weight.getValue() > EPSILON) updateRegionInformation(allContours, t);
     }
     
     private void updateRegionInformation(Collection<ActiveContour> contours, int t)
     {
-        for (int z = 0; z < inputData.getSizeZ(); z++)
+        int sizeZ = inputData.getSizeZ();
+        
+        for(int z=0;z<sizeZ;z++)
             Arrays.fill(contourMask_buffer.getDataXYAsByte(0, z, 0), (byte) 0);
         
         ArrayList<Future<?>> tasks = new ArrayList<Future<?>>(contours.size());
@@ -766,7 +775,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         }
         
         double outSum = 0, outCpt = 0;
-        for (int z = 0; z < contourMask_buffer.getSizeZ(); z++)
+        for (int z = 0; z < sizeZ; z++)
         {
             byte[] _mask = contourMask_buffer.getDataXYAsByte(0, z, 0);
             float[] _data = region_data.getDataXYAsFloat(0, z, 0);
@@ -779,6 +788,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                     outSum += value;
                     outCpt++;
                 }
+                else _mask[i] = 0;
             }
         }
         region_cout = outSum / outCpt;
