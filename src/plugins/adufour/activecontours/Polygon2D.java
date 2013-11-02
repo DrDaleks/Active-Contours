@@ -18,6 +18,7 @@ import java.awt.geom.PathIterator;
 import java.util.ArrayList;
 import java.util.Iterator;
 
+import javax.media.j3d.BoundingSphere;
 import javax.vecmath.Point3d;
 import javax.vecmath.Vector3d;
 
@@ -432,26 +433,24 @@ public class Polygon2D extends ActiveContour
         int sizeX = data.getWidth();
         int sizeY = data.getHeight();
         
-        if (bufferGraphics == null)
-        {
-            bufferGraphics = buffer.createGraphics();
-        }
+        if (bufferGraphics == null) bufferGraphics = buffer.createGraphics();
         
         // fill the contour contents in the buffer
-        Rectangle bounds = path.getBounds();
-        bufferGraphics.setClip(bounds);
         bufferGraphics.fill(path);
         
         // compute the interior mean intensity
         double inSum = 0, inCpt = 0;
+        Rectangle bounds = path.getBounds();
         
         int minX = Math.max(bounds.x, 0);
         int maxX = Math.min(bounds.x + bounds.width, sizeX);
         int minY = Math.max(bounds.y, 0);
         int maxY = Math.min(bounds.y + bounds.height, sizeY);
         
-        for (int j = minY, offset = j*sizeX+minX; j < maxY; j++)
+        for (int j = minY; j < maxY; j++)
         {
+            int offset = j * sizeX + minX;
+            
             for (int i = minX; i < maxX; i++, offset++)
             {
                 if (_buffer[offset] != 0)
@@ -464,10 +463,9 @@ public class Polygon2D extends ActiveContour
                     }
                 }
             }
-            offset += sizeX - minX - 1;
         }
         
-        return inSum / inCpt;
+        return inCpt == 0 ? 0.0 : inSum / inCpt;
     }
     
     /**
@@ -562,17 +560,14 @@ public class Polygon2D extends ActiveContour
         Vector3d grad = new Vector3d();
         
         // assume the edge data is in the first time/slice of the sequence
-        IcyBufferedImage edgeImage = edgeData.getImage(0, 0);
-        int width = edgeImage.getWidth();
-        int height = edgeImage.getHeight();
-        float[] edgeDataX = edgeImage.getDataXYAsFloat(0);
-        float[] edgeDataY = edgeImage.getDataXYAsFloat(1);
+        IcyBufferedImage edgeDataX = edgeData.getImage(0, 0, 0);
+        IcyBufferedImage edgeDataY = edgeData.getImage(0, 0, 1);
         
         for (int i = 0; i < n; i++)
         {
             Point3d p = points.get(i);
             Vector3d f = modelForces[i];
-            grad.set(getPixelValue(edgeDataX, width, height, p.x, p.y), getPixelValue(edgeDataY, width, height, p.x, p.y), 0.0);
+            grad.set(getPixelValue(edgeDataX, p.x, p.y), getPixelValue(edgeDataY, p.x, p.y), 0.0);
             grad.scale(weight);
             f.add(grad);
         }
@@ -590,11 +585,10 @@ public class Polygon2D extends ActiveContour
         Vector3d f, norm;
         double val, inDiff, outDiff, sum;
         int n = points.size();
+        int w = imageData.getWidth();
+        int h = imageData.getHeight();
         
         IcyBufferedImage currentSlice = imageData.getImage(0, 0); // FIXME z ?
-        int w = currentSlice.getWidth();
-        int h = currentSlice.getHeight();
-        float[] data = currentSlice.getDataXYAsFloat(0);
         
         for (int i = 0; i < n; i++)
         {
@@ -607,7 +601,7 @@ public class Polygon2D extends ActiveContour
             if (p.x < 1 || p.y < 1 || p.x >= w - 1 || p.y >= h - 1) continue;
             
             // invert the following lines for mean-based information
-            val = getPixelValue(data, w, h, p.x, p.y);
+            val = getPixelValue(currentSlice, p.x, p.y);
             inDiff = val - cin;
             outDiff = val - cout;
             sum = weight * contour_resolution.getValue() * (sensitivity * (outDiff * outDiff) - (inDiff * inDiff));
@@ -684,8 +678,10 @@ public class Polygon2D extends ActiveContour
     {
         updateNormalsIfNeeded();
         
-        Polygon2D p2 = (Polygon2D) target;
-        Rectangle r = p2.bufferGraphics.getClipBounds();
+        BoundingSphere targetSphere = target.getBoundingSphere();
+        Point3d targetCenter = new Point3d();
+        targetSphere.getCenter(targetCenter);
+        double targetRadius = targetSphere.getRadius();
         
         double penetration = 0;
         
@@ -695,8 +691,10 @@ public class Polygon2D extends ActiveContour
         for (Point3d p : points)
         {
             Vector3d feedbackForce = feedbackForces[index];
-
-            if (r.contains(p.x, p.y) && p2.path.contains(p.x, p.y))
+            
+            double distance = p.distance(targetCenter);
+            
+            if (distance < targetRadius)
             {
                 tests++;
                 
@@ -722,8 +720,11 @@ public class Polygon2D extends ActiveContour
      *            the Y-coordinate of the point
      * @return the interpolated image value at the given coordinates
      */
-    private float getPixelValue(float[] imageData, int width, int height, double x, double y)
+    private float getPixelValue(IcyBufferedImage imageFloat, double x, double y)
     {
+        final int width = imageFloat.getWidth();
+        final int height = imageFloat.getHeight();
+        
         final int i = (int) Math.round(x);
         final int j = (int) Math.round(y);
         
@@ -733,6 +734,7 @@ public class Polygon2D extends ActiveContour
         
         final int offset = i + j * width;
         final int offset_plus_1 = offset + 1; // saves 1 addition
+        float[] data = imageFloat.getDataXYAsFloat(0);
         
         x -= i;
         y -= j;
@@ -740,10 +742,10 @@ public class Polygon2D extends ActiveContour
         final double mx = 1 - x;
         final double my = 1 - y;
         
-        value += mx * my * imageData[offset];
-        value += x * my * imageData[offset_plus_1];
-        value += mx * y * imageData[offset + width];
-        value += x * y * imageData[offset_plus_1 + width];
+        value += mx * my * data[offset];
+        value += x * my * data[offset_plus_1];
+        value += mx * y * data[offset + width];
+        value += x * y * data[offset_plus_1 + width];
         
         return value;
     }
@@ -947,8 +949,6 @@ public class Polygon2D extends ActiveContour
         
         double value = getDimension(2);
         convergence.add(value);
-        
-        updatePath();
     }
     
     @Override
@@ -1286,6 +1286,7 @@ public class Polygon2D extends ActiveContour
     
     private void updatePath()
     {
+        double x, y;
         synchronized (path)
         {
             path.reset();
@@ -1294,16 +1295,23 @@ public class Polygon2D extends ActiveContour
             
             Point3d p = points.get(0);
             path.moveTo(p.x, p.y);
+            x = p.x;
+            y = p.y;
             
             for (int i = 1; i < nbPoints; i++)
             {
                 p = points.get(i);
                 path.lineTo(p.x, p.y);
+                x += p.x;
+                y += p.y;
                 // TODO
                 // Point3d pp = points.get(i-1);
                 // path.quadTo((pp.x + p.x)/2, (pp.y + p.y)/2, p.x, p.y);
             }
             path.closePath();
+            
+            setX(x / nbPoints);
+            setY(y / nbPoints);
         }
     }
     
