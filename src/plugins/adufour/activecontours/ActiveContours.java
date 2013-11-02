@@ -103,7 +103,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     public final EzVarBoolean              tracking              = new EzVarBoolean("Track objects over time", false);
     
     private final Sequence                 edgeData              = new Sequence("Edge information");
-    private final Sequence                 contourMask_buffer    = new Sequence("Mask data");
+    private Sequence                       contourMask_buffer;
     
     private Sequence                       region_data;
     private HashMap<ActiveContour, Double> region_cin            = new HashMap<ActiveContour, Double>(0);
@@ -379,6 +379,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             // initialize the mask buffer (used to calculate average intensities inside/outside
             if (isFirstImage)
             {
+                contourMask_buffer = new Sequence("Mask data");
                 for (int z = 0; z < inputData.getSizeZ(); z++)
                     contourMask_buffer.setImage(0, z, new IcyBufferedImage(inputData.getWidth(), inputData.getHeight(), 1, DataType.UBYTE));
             }
@@ -744,7 +745,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     {
         int sizeZ = inputData.getSizeZ();
         
-        for(int z=0;z<sizeZ;z++)
+        for (int z = 0; z < sizeZ; z++)
             Arrays.fill(contourMask_buffer.getDataXYAsByte(0, z, 0), (byte) 0);
         
         ArrayList<Future<?>> tasks = new ArrayList<Future<?>>(contours.size());
