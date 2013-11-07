@@ -1,6 +1,7 @@
 package plugins.adufour.activecontours;
 
 import icy.canvas.IcyCanvas;
+import icy.gui.frame.progress.AnnounceFrame;
 import icy.image.IcyBufferedImage;
 import icy.roi.ROI;
 import icy.roi.ROI2D;
@@ -88,7 +89,7 @@ public class Polygon2D extends ActiveContour
     
     private boolean          counterClockWise;
     
-    private Graphics2D       bufferGraphics;
+    // private Graphics2D bufferGraphics;
     
     protected Polygon2D(ActiveContours owner, EzVarDouble contour_resolution, EzVarInteger contour_minArea, SlidingWindow convergenceWindow)
     {
@@ -421,31 +422,30 @@ public class Polygon2D extends ActiveContour
         }
     }
     
+    private double cin = 0, cout = 0;
+    
     @Override
     public double computeAverageIntensity(Sequence imageData_float, Sequence buffer_data)
     {
         IcyBufferedImage data = imageData_float.getImage(0, 0);
         float[] _data = data.getDataXYAsFloat(0);
         
-        IcyBufferedImage buffer = buffer_data.getImage(0, 0);
-        byte[] _buffer = buffer.getDataXYAsByte(0);
-        
         int sizeX = data.getWidth();
         int sizeY = data.getHeight();
         
-        if (bufferGraphics == null) bufferGraphics = buffer.createGraphics();
+        // if (bufferGraphics == null) bufferGraphics = buffer.createGraphics();
         
         // fill the contour contents in the buffer
-        bufferGraphics.fill(path);
+        // bufferGraphics.fill(path);
         
         // compute the interior mean intensity
-        double inSum = 0, inCpt = 0;
+        double inSum = 0, inCpt = 0, outSum = 0, outCpt = 0;
         Rectangle bounds = path.getBounds();
         
-        int minX = Math.max(bounds.x, 0);
-        int maxX = Math.min(bounds.x + bounds.width, sizeX);
-        int minY = Math.max(bounds.y, 0);
-        int maxY = Math.min(bounds.y + bounds.height, sizeY);
+        int minX = Math.max(bounds.x - bounds.width, 0);
+        int maxX = Math.min(bounds.x + bounds.width * 2, sizeX);
+        int minY = Math.max(bounds.y - bounds.height, 0);
+        int maxY = Math.min(bounds.y + bounds.height * 2, sizeY);
         
         for (int j = minY; j < maxY; j++)
         {
@@ -453,19 +453,24 @@ public class Polygon2D extends ActiveContour
             
             for (int i = minX; i < maxX; i++, offset++)
             {
-                if (_buffer[offset] != 0)
+                if (bounds.contains(i, j) && path.contains(i, j))
                 {
-                    if (path.contains(i, j))
-                    {
-                        double value = _data[offset];
-                        inSum += value;
-                        inCpt++;
-                    }
+                    double value = _data[offset];
+                    inSum += value;
+                    inCpt++;
+                }
+                else
+                {
+                    double value = _data[offset];
+                    outSum += value;
+                    outCpt++;
                 }
             }
         }
         
-        return inCpt == 0 ? 0.0 : inSum / inCpt;
+        cin = inSum / inCpt;
+        cout = outSum / outCpt;
+        return cin;
     }
     
     /**
@@ -574,10 +579,10 @@ public class Polygon2D extends ActiveContour
     }
     
     @Override
-    void computeRegionForces(Sequence imageData, double weight, double cin, double cout)
+    void computeRegionForces(Sequence imageData, double weight, double sensitivity, double cin, double cout)
     {
         // uncomment these 2 lines for mean-based information
-        double sensitivity = 1 / Math.max(cout * 2, cin);
+        sensitivity = sensitivity / Math.max(cout, cin);
         
         updateNormalsIfNeeded();
         
@@ -588,7 +593,7 @@ public class Polygon2D extends ActiveContour
         int w = imageData.getWidth();
         int h = imageData.getHeight();
         
-        IcyBufferedImage currentSlice = imageData.getImage(0, 0); // FIXME z ?
+        IcyBufferedImage currentSlice = imageData.getImage(0, (int) Math.round(getZ()));
         
         for (int i = 0; i < n; i++)
         {
@@ -604,7 +609,7 @@ public class Polygon2D extends ActiveContour
             val = getPixelValue(currentSlice, p.x, p.y);
             inDiff = val - cin;
             outDiff = val - cout;
-            sum = weight * contour_resolution.getValue() * (sensitivity * (outDiff * outDiff) - (inDiff * inDiff));
+            sum = weight * contour_resolution.getValue() * (sensitivity * (outDiff * outDiff) - (inDiff * inDiff) / sensitivity);
             // sum = weight * (Math.log(sout) - Math.log(sin) + (outDiff * outDiff) / (2 * sout *
             // sout) - (inDiff * inDiff) / (2 * sin * sin));
             
@@ -785,31 +790,31 @@ public class Polygon2D extends ActiveContour
         switch (order)
         {
         
-        case 0: // number of points
-        {
-            return points.size();
-        }
-        
-        case 1: // perimeter
-        {
-            Point3d p1;
-            Point3d p2;
-            double l = 0.0;
-            int size = points.size();
-            for (int i = 0; i < size; i++)
+            case 0: // number of points
             {
-                p1 = points.get(i);
-                p2 = points.get((i + 1) % size);
-                l += Math.abs(p1.distance(p2));
+                return points.size();
             }
-            return l;
-        }
-        case 2: // area
-        {
-            return Math.abs(getAlgebraicArea());
-        }
-        default:
-            throw new UnsupportedOperationException("Dimension " + order + " not implemented");
+            
+            case 1: // perimeter
+            {
+                Point3d p1;
+                Point3d p2;
+                double l = 0.0;
+                int size = points.size();
+                for (int i = 0; i < size; i++)
+                {
+                    p1 = points.get(i);
+                    p2 = points.get((i + 1) % size);
+                    l += Math.abs(p1.distance(p2));
+                }
+                return l;
+            }
+            case 2: // area
+            {
+                return Math.abs(getAlgebraicArea());
+            }
+            default:
+                throw new UnsupportedOperationException("Dimension " + order + " not implemented");
         }
     }
     
@@ -945,11 +950,16 @@ public class Polygon2D extends ActiveContour
         normalsNeedUpdate = true;
         boundingSphereNeedsUpdate = true;
         
+        // compute some convergence criterion
+        
         if (convergence == null) return;
         
         double value = getDimension(2);
         convergence.add(value);
+        System.out.println(cin + "/" + cout + "/" + (cin/cout));
     }
+    
+    AnnounceFrame f = null;//new AnnounceFrame("ready");
     
     @Override
     public void paint(Graphics2D g, Sequence sequence, IcyCanvas canvas)

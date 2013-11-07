@@ -31,8 +31,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
-import javax.vecmath.Point3d;
-
 import plugins.adufour.activecontours.SlidingWindow.Operation;
 import plugins.adufour.blocks.lang.Block;
 import plugins.adufour.blocks.util.VarList;
@@ -82,6 +80,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     public final EzGroup                   region                = new EzGroup("Find homogeneous intensity areas");
     public final EzVarDimensionPicker      region_c              = new EzVarDimensionPicker("Find regions in channel", DimensionId.C, input);
     public final EzVarDouble               region_weight         = new EzVarDouble("Region weight", 1.0, 0.0, 1.0, 0.1);
+    public final EzVarDouble               region_sensitivity    = new EzVarDouble("Region sensitivity", 1.0, 0.2, 5.0, 0.1);
     
     public final EzVarDouble               balloon_weight        = new EzVarDouble("Contour inflation", 0, -0.5, 0.5, 0.001);
     
@@ -145,7 +144,9 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         // region
         region.setToolTipText("Sets the contour(s) to isolate homogeneous intensity regions");
         region_weight.setToolTipText("Set to 0 to deactivate this parameter");
-        region.addEzComponent(region_c, region_weight);
+        region_sensitivity.setToolTipText("Increase this value to be more sensitive to dim objects (default: 1)");
+        // showAdvancedOptions.addVisibilityTriggerTo(region_sensitivity, true);
+        region.addEzComponent(region_c, region_weight, region_sensitivity);
         addEzComponent(region);
         
         // balloon force
@@ -231,6 +232,9 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         // replace any ActiveContours Painter object on the sequence by ours
         for (Overlay overlay : inputData.getOverlays())
             if (overlay instanceof ActiveContoursOverlay) inputData.removeOverlay(overlay);
+        
+        for (ROI roi : inputData.getROIs())
+            if (roi.getName().startsWith("[T=")) inputData.removeROI(roi);
         
         overlay = new ActiveContoursOverlay(trackGroup);
         overlay.setPriority(OverlayPriority.TOPMOST);
@@ -422,8 +426,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                             for (BooleanMask2D comp : components)
                             {
                                 ROI2DArea roi = new ROI2DArea(comp);
-                                final ActiveContour contour = new Polygon2D(ActiveContours.this, contour_resolution, contour_minArea, new SlidingWindow(convergence_winSize
-                                        .getValue()), roi);
+                                final ActiveContour contour = new Polygon2D(ActiveContours.this, contour_resolution, contour_minArea, new SlidingWindow(convergence_winSize.getValue()), roi);
                                 contour.setX(roi.getBounds2D().getCenterX());
                                 contour.setY(roi.getBounds2D().getCenterY());
                                 contour.setT(t);
@@ -441,8 +444,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                         }
                         else
                         {
-                            final ActiveContour contour = new Polygon2D(ActiveContours.this, contour_resolution, contour_minArea,
-                                    new SlidingWindow(convergence_winSize.getValue()), roi2d);
+                            final ActiveContour contour = new Polygon2D(ActiveContours.this, contour_resolution, contour_minArea, new SlidingWindow(convergence_winSize.getValue()), roi2d);
                             contour.setX(roi2d.getBounds2D().getCenterX());
                             contour.setY(roi2d.getBounds2D().getCenterY());
                             contour.setT(t);
@@ -526,16 +528,11 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         
         int nbConvergedContours = 0;
         
-        long iter = 0;
-        
         final HashSet<ActiveContour> evolvingContours = new HashSet<ActiveContour>(allContours.size());
         
         while (!globalStop && nbConvergedContours < allContours.size())
         {
             nbConvergedContours = 0;
-            
-            // update region information every 10 iterations
-            if (region_weight.getValue() > EPSILON && iter % 10 == 0) updateRegionInformation(allContours, t);
             
             // take a snapshot of the current list of evolving (i.e. non-converged) contours
             evolvingContours.clear();
@@ -560,13 +557,15 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             // re-sample the contours to ensure homogeneous resolution
             resampleContours(evolvingContours, allContours, t);
             
+            // update region information every 10 iterations
+
+            if (region_weight.getValue() > EPSILON) updateRegionInformation(allContours, t);
+            
             // compute deformations issued from the energy minimization
             deformContours(evolvingContours, allContours, field);
             
             // compute energy
             // computeEnergy(mainService, allContours);
-            
-            iter++;
             
             if (Thread.currentThread().isInterrupted()) globalStop = true;
             
@@ -593,7 +592,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             
             if (regul_weight.getValue() > EPSILON) contour.computeInternalForces(regul_weight.getValue());
             
-            if (region_weight.getValue() > EPSILON) contour.computeRegionForces(region_data, region_weight.getValue(), region_cin.get(contour), region_cout);
+            if (region_weight.getValue() > EPSILON) contour.computeRegionForces(region_data, region_weight.getValue(), region_sensitivity.getValue(), region_cin.get(contour), region_cout);
             
             if (axis_weight.getValue() > EPSILON) contour.computeAxisForces(axis_weight.getValue());
             
@@ -615,7 +614,8 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                         
                         if (Math.abs(edge_weight.getValue()) > EPSILON) contour.computeEdgeForces(edge_weight.getValue(), edgeData);
                         
-                        if (region_weight.getValue() > EPSILON) contour.computeRegionForces(region_data, region_weight.getValue(), region_cin.get(contour), region_cout);
+                        if (region_weight.getValue() > EPSILON)
+                            contour.computeRegionForces(region_data, region_weight.getValue(), region_sensitivity.getValue(), region_cin.get(contour), region_cout);
                         
                         if (axis_weight.getValue() > EPSILON) contour.computeAxisForces(axis_weight.getValue());
                         
@@ -730,7 +730,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             }
         }
         
-        if (change.getValue() && region_weight.getValue() > EPSILON) updateRegionInformation(allContours, t);
+//        if (change.getValue() && region_weight.getValue() > EPSILON) updateRegionInformation(allContours, t);
     }
     
     private void updateRegionInformation(Collection<ActiveContour> contours, int t)
@@ -789,6 +789,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         ArrayList<TrackSegment> segments = trackGroup.getTrackSegmentList();
         
         ArrayList<ROI> rois = null;
+        // Append the current list to the existing one
         if (output_rois.getValue()) rois = new ArrayList<ROI>(Arrays.asList(roiOutput.getValue()));
         
         for (int i = 1; i <= segments.size(); i++)
@@ -798,25 +799,33 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             ActiveContour contour = (ActiveContour) segment.getDetectionAtTime(t);
             if (contour == null) continue;
             
-            // store detection parameters
-            Point3d center = new Point3d();
-            for (Point3d p : contour)
-                center.add(p);
-            center.scale(1.0 / contour.getDimension(0));
-            contour.setX(center.x);
-            contour.setY(center.y);
-            
             // output as ROIs
             if (output_rois.getValue())
             {
                 ROI roi = contour.toROI();
-                roi.setColor(contour.getColor());
                 roi.setName("[T=" + StringUtil.toString(t, 1 + (int) Math.round(Math.log10(inputData.getSizeT()))) + "] Object #" + i);
+                
+                // // merge with existing ROI
+                // if (rois.containsKey(segment))
+                // {
+                // roi = ROIUtil.merge(Arrays.asList(rois.get(segment), roi), BooleanOperator.OR);
+                // }
+                // else
+                // {
+                // roi.setName("Contour #" + i);
+                // }
+                // rois.put(segment, roi);
+                
+                roi.setColor(contour.getColor());
                 rois.add(roi);
             }
         }
         
-        if (output_rois.getValue() && rois.size() > 0) roiOutput.setValue(rois.toArray(new ROI2D[rois.size()]));
+        if (output_rois.getValue() && rois.size() > 0)
+        {
+            // roiOutput.setValue(rois.values().toArray(new ROI[0]));
+            roiOutput.setValue(rois.toArray(new ROI[0]));
+        }
     }
     
     @Override

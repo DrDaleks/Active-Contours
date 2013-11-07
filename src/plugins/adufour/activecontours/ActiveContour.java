@@ -165,9 +165,9 @@ public abstract class ActiveContour extends Detection implements Iterable<Point3
      * @param cout
      *            the intensity mean outside the contour
      * @param sensitivity
-     *            set 1 for default, lower than 1 for high SNRs and vice-versa
+     *            set 1 for default, greater than 1 for high SNRs and vice-versa
      */
-    abstract void computeRegionForces(Sequence imageData, double weight, double cin, double cout);
+    abstract void computeRegionForces(Sequence imageData, double weight, double sensitivity, double cin, double cout);
     
     abstract void computeInternalForces(double weight);
     
