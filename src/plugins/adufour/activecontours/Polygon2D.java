@@ -133,6 +133,8 @@ public class Polygon2D extends ActiveContour
             throw new EzException("Wrong ROI type. Only Rectangle, Ellipse, Polygon and Area are supported", true);
         }
         
+        setZ(roi.getZ());
+        
         boolean contourOK = false;
         double area = 0;
         
@@ -425,10 +427,10 @@ public class Polygon2D extends ActiveContour
     private double cin = 0, cout = 0;
     
     @Override
-    public double computeAverageIntensity(Sequence imageData_float, Sequence buffer_data)
+    public double computeAverageIntensity(Sequence imageData_float, int channel, Sequence buffer_data)
     {
         IcyBufferedImage data = imageData_float.getImage(0, 0);
-        float[] _data = data.getDataXYAsFloat(0);
+        float[] _data = data.getDataXYAsFloat(channel);
         
         int sizeX = data.getWidth();
         int sizeY = data.getHeight();
@@ -557,30 +559,37 @@ public class Polygon2D extends ActiveContour
      * @param edge_data
      */
     @Override
-    void computeEdgeForces(double weight, Sequence edgeData)
+    void computeEdgeForces(Sequence edgeData, int channel, double weight)
     {
         int n = points.size();
         updateNormalsIfNeeded();
         
         Vector3d grad = new Vector3d();
         
-        // assume the edge data is in the first time/slice of the sequence
-        IcyBufferedImage edgeDataX = edgeData.getImage(0, 0, 0);
-        IcyBufferedImage edgeDataY = edgeData.getImage(0, 0, 1);
+        // // assume the edge data is in the first time/slice of the sequence
+        // IcyBufferedImage edgeDataX = edgeData.getImage(0, 0, 0);
+        // IcyBufferedImage edgeDataY = edgeData.getImage(0, 0, 1);
+        
+        int width = edgeData.getWidth();
+        int height = edgeData.getHeight();
+        float[] data = edgeData.getDataXYAsFloat(0, (int) Math.round(getZ()), channel);
         
         for (int i = 0; i < n; i++)
         {
             Point3d p = points.get(i);
             Vector3d f = modelForces[i];
-            grad.set(getPixelValue(edgeDataX, p.x, p.y), getPixelValue(edgeDataY, p.x, p.y), 0.0);
+            double val = getPixelValue(data, width, height, p.x, p.y);
+            double gX = getPixelValue(data, width, height, p.x + 1, p.y);
+            double gY = getPixelValue(data, width, height, p.x, p.y + 1);
+            grad.set(gX - val, gY - val, 0.0);
             grad.scale(weight);
             f.add(grad);
         }
     }
     
     @Override
-    void computeRegionForces(Sequence imageData, double weight, double sensitivity, double cin, double cout)
-    {
+    void computeRegionForces(Sequence imageData, int channel, double weight, double sensitivity, double cin, double cout)
+        {
         // uncomment these 2 lines for mean-based information
         sensitivity = sensitivity / Math.max(cout, cin);
         
@@ -590,10 +599,10 @@ public class Polygon2D extends ActiveContour
         Vector3d f, norm;
         double val, inDiff, outDiff, sum;
         int n = points.size();
-        int w = imageData.getWidth();
-        int h = imageData.getHeight();
         
-        IcyBufferedImage currentSlice = imageData.getImage(0, (int) Math.round(getZ()));
+        int width = imageData.getWidth();
+        int height = imageData.getHeight();
+        float[] data = imageData.getDataXYAsFloat(0, (int) Math.round(getZ()), channel);
         
         for (int i = 0; i < n; i++)
         {
@@ -603,13 +612,13 @@ public class Polygon2D extends ActiveContour
             norm = contourNormals[i];
             
             // bounds check
-            if (p.x < 1 || p.y < 1 || p.x >= w - 1 || p.y >= h - 1) continue;
+            if (p.x < 1 || p.y < 1 || p.x >= width - 1 || p.y >= height - 1) continue;
             
             // invert the following lines for mean-based information
-            val = getPixelValue(currentSlice, p.x, p.y);
+            val = getPixelValue(data, width, height, p.x, p.y);
             inDiff = val - cin;
             outDiff = val - cout;
-            sum = weight * contour_resolution.getValue() * (sensitivity * (outDiff * outDiff) - (inDiff * inDiff) / sensitivity);
+            sum = weight * contour_resolution.getValue() * (sensitivity * (outDiff * outDiff) - (inDiff * inDiff));
             // sum = weight * (Math.log(sout) - Math.log(sin) + (outDiff * outDiff) / (2 * sout *
             // sout) - (inDiff * inDiff) / (2 * sin * sin));
             
@@ -725,11 +734,8 @@ public class Polygon2D extends ActiveContour
      *            the Y-coordinate of the point
      * @return the interpolated image value at the given coordinates
      */
-    private float getPixelValue(IcyBufferedImage imageFloat, double x, double y)
+    private float getPixelValue(float[] data, int width, int height, double x, double y)
     {
-        final int width = imageFloat.getWidth();
-        final int height = imageFloat.getHeight();
-        
         final int i = (int) Math.round(x);
         final int j = (int) Math.round(y);
         
@@ -739,7 +745,6 @@ public class Polygon2D extends ActiveContour
         
         final int offset = i + j * width;
         final int offset_plus_1 = offset + 1; // saves 1 addition
-        float[] data = imageFloat.getDataXYAsFloat(0);
         
         x -= i;
         y -= j;
@@ -954,13 +959,20 @@ public class Polygon2D extends ActiveContour
         
         if (convergence == null) return;
         
-        double value = getDimension(2);
-        convergence.add(value);
-        System.out.println(cin + "/" + cout + "/" + (cin/cout));
+        // double value = getDimension(2);
+         System.out.println(cin);
+        if (cout != 0.0)
+        {
+            convergence.add(cin);
+        }
+        else
+        {
+            convergence.add(getDimension(2));
+        }
     }
     
-    AnnounceFrame f = null;//new AnnounceFrame("ready");
-    
+    AnnounceFrame f = null; // new AnnounceFrame("ready");
+                            
     @Override
     public void paint(Graphics2D g, Sequence sequence, IcyCanvas canvas)
     {
