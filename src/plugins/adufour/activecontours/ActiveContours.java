@@ -46,6 +46,9 @@ import plugins.adufour.ezplug.EzVarEnum;
 import plugins.adufour.ezplug.EzVarInteger;
 import plugins.adufour.ezplug.EzVarListener;
 import plugins.adufour.ezplug.EzVarSequence;
+import plugins.adufour.filtering.Convolution1D;
+import plugins.adufour.filtering.ConvolutionException;
+import plugins.adufour.filtering.Kernels1D;
 import plugins.adufour.vars.lang.VarBoolean;
 import plugins.adufour.vars.lang.VarROIArray;
 import plugins.adufour.vars.util.VarException;
@@ -211,23 +214,23 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         
         int startT = inputData.getFirstViewer() == null ? 0 : inputData.getFirstViewer().getPositionT();
         int endT = tracking.getValue() ? inputData.getSizeT() - 1 : startT;
-
+        
         trackGroup = new TrackGroup(inputData);
         trackGroup.setDescription("Active contours (" + new Date().toString() + ")");
-//        
-//        ThreadUtil.invokeNow(new Runnable()
-//        {
-//            @Override
-//            public void run()
-//            {
-//                trackGroup.setDescription("Active contours (" + new Date().toString() + ")");
-//                if (tracking.getValue())
-//                {
-//                    SwimmingObject object = new SwimmingObject(trackGroup);
-//                    Icy.getMainInterface().getSwimmingPool().add(object);
-//                }
-//            }
-//        });
+        //
+        // ThreadUtil.invokeNow(new Runnable()
+        // {
+        // @Override
+        // public void run()
+        // {
+        // trackGroup.setDescription("Active contours (" + new Date().toString() + ")");
+        // if (tracking.getValue())
+        // {
+        // SwimmingObject object = new SwimmingObject(trackGroup);
+        // Icy.getMainInterface().getSwimmingPool().add(object);
+        // }
+        // }
+        // });
         
         // replace any ActiveContours Painter object on the sequence by ours
         for (Overlay overlay : inputData.getOverlays())
@@ -329,57 +332,18 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 throw new IcyHandledException("The selected region channel is valid.");
             }
             
-            // Sequence gradX = SequenceUtil.getCopy(inputData.getSizeC() == 1 ? currentFrame_float
-            // : SequenceUtil.extractChannel(currentFrame_float, edge_c.getValue()));
-            //
-            // Sequence gradient = Kernels1D.GRADIENT.toSequence();
-            // Sequence gaussian =
-            // Kernels1D.CUSTOM_GAUSSIAN.createGaussianKernel1D(0.5).toSequence();
-            //
-            // // smooth the signal first
-            // try
-            // {
-            // Convolution1D.convolve(gradX, gaussian, gaussian, null);
-            // }
-            // catch (ConvolutionException e)
-            // {
-            // throw new EzException("Cannot smooth the signal: " + e.getMessage(), true);
-            // }
-            //
-            // // clone into gradY
-            // Sequence gradY = SequenceUtil.getCopy(gradX);
-            // Sequence gradZ = (inputData.getSizeZ() == 1) ? null : SequenceUtil.getCopy(gradX);
-            //
-            // // compute the gradient in each direction
-            // try
-            // {
-            // Convolution1D.convolve(gradX, gradient, null, null);
-            // Convolution1D.convolve(gradY, null, gradient, null);
-            // if (gradZ != null) Convolution1D.convolve(gradZ, null, null, gradient);
-            // }
-            // catch (ConvolutionException e)
-            // {
-            // throw new EzException("Cannot compute the gradient information: " + e.getMessage(),
-            // true);
-            // }
-            //
-            // // combine the edge data as multi-channel data
-            // if (gradZ == null)
-            // {
-            // float[][] edgeSlice = new float[][] { gradX.getDataXYAsFloat(0, 0, 0),
-            // gradY.getDataXYAsFloat(0, 0, 0) };
-            // edgeData.setImage(0, 0, new IcyBufferedImage(inputData.getWidth(),
-            // inputData.getHeight(), edgeSlice));
-            // }
-            // else for (int z = 0; z < edgeData.getSizeZ(); z++)
-            // {
-            // float[][] edgeSlice = new float[][] { gradX.getDataXYAsFloat(0, z, 0),
-            // gradY.getDataXYAsFloat(0, z, 0), gradZ.getDataXYAsFloat(0, z, 0) };
-            // edgeData.setImage(0, z, new IcyBufferedImage(inputData.getWidth(),
-            // inputData.getHeight(), edgeSlice));
-            // }
-            
             edgeData = currentFrame_float;
+            Sequence gaussian = Kernels1D.CUSTOM_GAUSSIAN.createGaussianKernel1D(2).toSequence();
+            
+            // smooth the signal first
+            try
+            {
+                Convolution1D.convolve(edgeData, gaussian, gaussian, null);
+            }
+            catch (ConvolutionException e)
+            {
+                throw new EzException("Cannot smooth the signal: " + e.getMessage(), true);
+            }
         }
         
         // 2) initialize the region data
