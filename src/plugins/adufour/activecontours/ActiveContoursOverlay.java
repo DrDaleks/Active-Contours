@@ -34,6 +34,8 @@ public class ActiveContoursOverlay extends Overlay
     @Override
     public void paint(Graphics2D g, Sequence sequence, IcyCanvas canvas)
     {
+        if (g == null) return;
+        
         int t = canvas.getPositionT();
         
         if (trackGroup == null)
