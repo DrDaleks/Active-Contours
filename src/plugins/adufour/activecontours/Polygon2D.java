@@ -566,10 +566,6 @@ public class Polygon2D extends ActiveContour
         
         Vector3d grad = new Vector3d();
         
-        // // assume the edge data is in the first time/slice of the sequence
-        // IcyBufferedImage edgeDataX = edgeData.getImage(0, 0, 0);
-        // IcyBufferedImage edgeDataY = edgeData.getImage(0, 0, 1);
-        
         int width = edgeData.getWidth();
         int height = edgeData.getHeight();
         float[] data = edgeData.getDataXYAsFloat(0, (int) Math.round(getZ()), channel);
@@ -578,10 +574,12 @@ public class Polygon2D extends ActiveContour
         {
             Point3d p = points.get(i);
             Vector3d f = modelForces[i];
-            double val = getPixelValue(data, width, height, p.x, p.y);
-            double gX = getPixelValue(data, width, height, p.x + 1, p.y);
-            double gY = getPixelValue(data, width, height, p.x, p.y + 1);
-            grad.set(gX - val, gY - val, 0.0);
+            // compute the gradient (2nd order)
+            double nextX = getPixelValue(data, width, height, p.x + 1, p.y);
+            double prevX = getPixelValue(data, width, height, p.x - 1, p.y);
+            double nextY = getPixelValue(data, width, height, p.x, p.y + 1);
+            double prevY = getPixelValue(data, width, height, p.x, p.y - 1);
+            grad.set(nextX - prevX, nextY - prevY, 0.0);
             grad.scale(weight);
             f.add(grad);
         }
@@ -589,7 +587,7 @@ public class Polygon2D extends ActiveContour
     
     @Override
     void computeRegionForces(Sequence imageData, int channel, double weight, double sensitivity, double cin, double cout)
-        {
+    {
         // uncomment these 2 lines for mean-based information
         sensitivity = sensitivity / Math.max(cout, cin);
         
@@ -619,8 +617,6 @@ public class Polygon2D extends ActiveContour
             inDiff = val - cin;
             outDiff = val - cout;
             sum = weight * contour_resolution.getValue() * (sensitivity * (outDiff * outDiff) - (inDiff * inDiff));
-            // sum = weight * (Math.log(sout) - Math.log(sin) + (outDiff * outDiff) / (2 * sout *
-            // sout) - (inDiff * inDiff) / (2 * sin * sin));
             
             if (counterClockWise)
             {
@@ -647,6 +643,8 @@ public class Polygon2D extends ActiveContour
         
         Vector3d f;
         Point3d prev, curr, next;
+        
+        weight /= contour_resolution.getValue();
         
         // first point
         prev = points.get(n - 1);
@@ -675,8 +673,8 @@ public class Polygon2D extends ActiveContour
         curr = points.get(n - 1);
         next = points.get(0);
         
-        f.x += weight * (prev.x + next.x - 2 * curr.x) / contour_resolution.getValue();
-        f.y += weight * (prev.y + next.y - 2 * curr.y) / contour_resolution.getValue();
+        f.x += weight * (prev.x - 2 * curr.x + next.x);
+        f.y += weight * (prev.y - 2 * curr.y + next.y);
     }
     
     /**
@@ -929,7 +927,7 @@ public class Polygon2D extends ActiveContour
             // apply model forces if p lies within the area of interest
             if (field != null && field.contains(p.x, p.y, 0, 0, 0) && modelForces[index] != null) force.set(modelForces[index]);
             
-            // apply feeback forces all the time
+            // apply feedback forces all the time
             force.add(feedbackForces[index]);
             
             force.scale(timeStep);
@@ -959,8 +957,6 @@ public class Polygon2D extends ActiveContour
         
         if (convergence == null) return;
         
-        // double value = getDimension(2);
-         System.out.println(cin);
         if (cout != 0.0)
         {
             convergence.add(cin);
