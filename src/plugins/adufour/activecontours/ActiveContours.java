@@ -734,7 +734,11 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             {
                 public void run()
                 {
-                    region_cin.put(contour, contour.computeAverageIntensity(region_data, region_c.getValue(), contourMask_buffer));
+                    double cin = contour.computeAverageIntensity(region_data, region_c.getValue(), contourMask_buffer);
+                    synchronized (region_cin)
+                    {
+                        region_cin.put(contour, cin);
+                    }
                 }
             }));
         
