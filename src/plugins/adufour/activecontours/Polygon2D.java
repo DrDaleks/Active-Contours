@@ -89,8 +89,6 @@ public class Polygon2D extends ActiveContour
     
     private boolean          counterClockWise;
     
-    // private Graphics2D bufferGraphics;
-    
     protected Polygon2D(ActiveContours owner, EzVarDouble contour_resolution, EzVarInteger contour_minArea, SlidingWindow convergenceWindow)
     {
         super(owner, contour_resolution, contour_minArea, convergenceWindow);
