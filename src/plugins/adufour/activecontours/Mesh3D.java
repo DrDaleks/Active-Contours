@@ -641,41 +641,69 @@ public class Mesh3D extends ActiveContour
         return tests;
     }
     
-    /**
-     * Calculates the 2D image value at the given real coordinates by bilinear interpolation
-     * 
-     * @param imageFloat
-     *            the image to sample (must be of type {@link DataType#DOUBLE})
-     * @param x
-     *            the X-coordinate of the point
-     * @param y
-     *            the Y-coordinate of the point
-     * @return the interpolated image value at the given coordinates
-     */
-    private float getPixelValue(float[] data, int width, int height, double x, double y)
+    public double contains(Point3d p)
     {
-        final int i = (int) Math.round(x);
-        final int j = (int) Math.round(y);
+        // FIXME this is *THE* hot-spot
         
-        if (i < 0 || i >= width - 1 || j < 0 || j >= height - 1) return 0;
+        double epsilon = 1.0e-12;
         
-        float value = 0;
+        Vector3d edge1 = new Vector3d(), edge2 = new Vector3d();
+        Vector3d vp = new Vector3d(), vt = new Vector3d(), vq = new Vector3d();
+        Vector3d ray = new Vector3d();
         
-        final int offset = i + j * width;
-        final int offset_plus_1 = offset + 1; // saves 1 addition
+        // the input point belongs to another mesh
+        // 1) trace a ray from that point outwards (away from my center)
+        // 2) count the intersections with my boundary
+        // 3) if the number is odd, the point is inside
+        // 4) if the point is inside, measure the distance to the edge
         
-        x -= i;
-        y -= j;
+        // ray.negate(vTest.normal); // was supper buggy upon close contacts !
         
-        final double mx = 1 - x;
-        final double my = 1 - y;
+        // create a ray from the mass center to the given point
+        ray.sub(p, getMassCenter());
         
-        value += mx * my * data[offset];
-        value += x * my * data[offset_plus_1];
-        value += mx * y * data[offset + width];
-        value += x * y * data[offset_plus_1 + width];
+        double penetration = Double.MAX_VALUE;
+        int crossCount = 0;
         
-        return value;
+        double det, u, v, distance;
+        
+        for (Face f : faces)
+        {
+            Point3d v1 = vertices.get(f.v1).position;
+            Point3d v2 = vertices.get(f.v2).position;
+            Point3d v3 = vertices.get(f.v3).position;
+            
+            edge1.sub(v3, v1);
+            edge2.sub(v2, v1);
+            
+            vp.cross(ray, edge2);
+            
+            det = edge1.dot(vp);
+            
+            if (det < epsilon) continue;
+            
+            vt.sub(p, v1);
+            
+            u = vt.dot(vp);
+            
+            if (u < 0 || u > det) continue;
+            
+            vq.cross(vt, edge1);
+            
+            v = ray.dot(vq);
+            
+            if (v < 0 || u + v > det) continue;
+            
+            distance = edge2.dot(vq) / det;
+            
+            if (distance < 0) continue;
+            
+            if (penetration > distance) penetration = distance;
+            
+            crossCount++;
+        }
+        
+        return crossCount % 2 == 1 ? penetration : 0;
     }
     
     public double getDimension(int order)
@@ -742,6 +770,48 @@ public class Mesh3D extends ActiveContour
         }
     }
     
+    public Point3d getMassCenter()
+    {
+        return new Point3d(getX(), getY(), getZ());
+    }
+    
+    /**
+     * Calculates the 2D image value at the given real coordinates by bilinear interpolation
+     * 
+     * @param imageFloat
+     *            the image to sample (must be of type {@link DataType#DOUBLE})
+     * @param x
+     *            the X-coordinate of the point
+     * @param y
+     *            the Y-coordinate of the point
+     * @return the interpolated image value at the given coordinates
+     */
+    private float getPixelValue(float[] data, int width, int height, double x, double y)
+    {
+        final int i = (int) Math.round(x);
+        final int j = (int) Math.round(y);
+        
+        if (i < 0 || i >= width - 1 || j < 0 || j >= height - 1) return 0;
+        
+        float value = 0;
+        
+        final int offset = i + j * width;
+        final int offset_plus_1 = offset + 1; // saves 1 addition
+        
+        x -= i;
+        y -= j;
+        
+        final double mx = 1 - x;
+        final double my = 1 - y;
+        
+        value += mx * my * data[offset];
+        value += x * my * data[offset_plus_1];
+        value += mx * y * data[offset + width];
+        value += x * y * data[offset_plus_1 + width];
+        
+        return value;
+    }
+    
     @Override
     protected void initFrom(ActiveContour contour)
     {
@@ -756,77 +826,6 @@ public class Mesh3D extends ActiveContour
         x /= n;
         y /= n;
     }
-        
-    public Point3d getMassCenter()
-    {
-        return new Point3d(getX(), getY(), getZ());
-    }
-    
-    public double contains(Point3d p)
-    {
-        // FIXME this is *THE* hot-spot
-        
-        double epsilon = 1.0e-12;
-     
-        Vector3d edge1 = new Vector3d(), edge2 = new Vector3d();
-        Vector3d vp    = new Vector3d(), vt = new Vector3d(), vq = new Vector3d();
-        Vector3d ray = new Vector3d();
-
-        // the input point belongs to another mesh
-        // 1) trace a ray from that point outwards (away from my center)
-        // 2) count the intersections with my boundary
-        // 3) if the number is odd, the point is inside
-        // 4) if the point is inside, measure the distance to the edge
-        
-        //ray.negate(vTest.normal); // was supper buggy upon close contacts !
-        
-        // create a ray from the mass center to the given point
-        ray.sub(p, getMassCenter());
-        
-        double penetration = Double.MAX_VALUE;
-        int crossCount = 0;
-        
-        double det, u, v, distance;
-        
-        for (Face f : faces)
-        {
-            Point3d v1 = vertices.get(f.v1).position;
-            Point3d v2 = vertices.get(f.v2).position;
-            Point3d v3 = vertices.get(f.v3).position;
-            
-            edge1.sub(v3, v1);
-            edge2.sub(v2, v1);
-            
-            vp.cross(ray, edge2);
-            
-             det = edge1.dot(vp);
-            
-            if (det < epsilon) continue;
-            
-            vt.sub(p, v1);
-            
-             u = vt.dot(vp);
-            
-            if (u < 0 || u > det) continue;
-            
-            vq.cross(vt, edge1);
-            
-             v = ray.dot(vq);
-            
-            if (v < 0 || u + v > det) continue;
-            
-             distance = edge2.dot(vq) / det;
-            
-            if (distance < 0) continue;
-            
-            if (penetration > distance) penetration = distance;
-            
-            crossCount++;
-        }
-        
-        return crossCount % 2 == 1 ? penetration : 0;
-    }
-
     
     @Override
     public Iterator<Point3d> iterator()
@@ -877,45 +876,52 @@ public class Mesh3D extends ActiveContour
     
     void move(ROI field, double timeStep)
     {
-        Vector3d force = new Vector3d();
         double maxDisp = contour_resolution.getValue() * timeStep;
         
-        int n = points.size();
+        // prepare to compute the new mass center
+        double xSum = 0, ySum = 0, zSum = 0;
+        int nbPoints = 0;
         
-        if (modelForces == null || modelForces.length != n) return;
-        
-        double x = 0;
-        double y = 0;
-        
-        for (int index = 0; index < n; index++)
+        for (Vertex v : vertices)
         {
-            Point3d p = points.get(index);
+            if (v == null) continue;
             
             // apply model forces if p lies within the area of interest
-            if (field != null && field.contains(p.x, p.y, 0, 0, 0) && modelForces[index] != null) force.set(modelForces[index]);
+            if (field != null && !field.contains(v.position.x, v.position.y, v.position.z, 0, 0))
+            {
+                // vertex is out of bounds => don't drive it anywhere
+                v.drivingForces.set(0, 0, 0);
+            }
             
-            // apply feedback forces all the time
-            force.add(feedbackForces[index]);
+            // add feedback forces
+            v.drivingForces.add(v.feedbackForces);
             
-            force.scale(timeStep);
+            // compute the final force
+            v.drivingForces.scale(timeStep);
             
-            double disp = force.length();
+            // compute the length of the final force
+            double disp = v.drivingForces.length();
             
-            if (disp > maxDisp) force.scale(maxDisp / disp);
+            // adjust the force if too strong (~ CFL condition)
+            if (disp > maxDisp) v.drivingForces.scale(maxDisp / disp);
             
-            p.add(force);
+            // move the vertex
+            v.position.add(v.drivingForces);
             
-            x += p.x;
-            y += p.y;
+            // accumulate coordinates
+            xSum += v.position.x;
+            ySum += v.position.y;
+            zSum += v.position.z;
+            nbPoints++;
             
-            force.set(0, 0, 0);
-            
-            modelForces[index].set(0, 0, 0);
-            feedbackForces[index].set(0, 0, 0);
+            // reset forces
+            v.drivingForces.set(0, 0, 0);
+            v.feedbackForces.set(0, 0, 0);
         }
         
-        setX(x / n);
-        setY(y / n);
+        setX(xSum / nbPoints);
+        setY(ySum / nbPoints);
+        setZ(zSum / nbPoints);
         
         normalsNeedUpdate = true;
         boundingSphereNeedsUpdate = true;
@@ -1359,7 +1365,9 @@ public class Mesh3D extends ActiveContour
         
         public final ArrayList<Integer> neighbors;
         
-        public final Vector3d           forces;
+        public final Vector3d           drivingForces;
+        
+        public final Vector3d           feedbackForces;
         
         public final Vector3d           normal;
         
@@ -1383,7 +1391,8 @@ public class Mesh3D extends ActiveContour
                 System.out.println("new vertex is NaN");
             }
             this.neighbors = new ArrayList<Integer>(nbNeighbors);
-            this.forces = new Vector3d();
+            this.drivingForces = new Vector3d();
+            this.feedbackForces = new Vector3d();
             this.normal = new Vector3d();
         }
         
