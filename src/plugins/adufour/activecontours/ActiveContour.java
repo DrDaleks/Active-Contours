@@ -198,15 +198,6 @@ public abstract class ActiveContour extends Detection implements Iterable<Point3
     public abstract double contains(Point3d p);
     
     /**
-     * Computes the algebraic area of the current contour. The returned value is negative if the
-     * contour points are order clockwise and positive if ordered counter-clockwise. The contour's
-     * surface is just the absolute value of this algebraic surface
-     * 
-     * @return
-     */
-    protected abstract double getAlgebraicArea();
-    
-    /**
      * 
      * @param order
      *            the dimension (a.k.a. norm) to compute:<br/>

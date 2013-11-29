@@ -119,7 +119,7 @@ public class Polygon2D extends ActiveContour
         // in any case, don't forget to close the path
         updatePath();
         
-        counterClockWise = (getAlgebraicArea() > 0);
+        counterClockWise = (getAlgebraicInterior() > 0);
     }
     
     public Polygon2D(ActiveContours owner, EzVarDouble contour_resolution, EzVarInteger contour_minArea, SlidingWindow convergenceWindow, ROI2D roi)
@@ -154,7 +154,7 @@ public class Polygon2D extends ActiveContour
             }
             else
             {
-                area = getAlgebraicArea();
+                area = getAlgebraicInterior();
                 if (Math.abs(area) < contour_minArea.getValue())
                 {
                     roi = new ROI2DEllipse(roi.getBounds2D());
@@ -209,7 +209,7 @@ public class Polygon2D extends ActiveContour
             
             updatePath();
             
-            area = getAlgebraicArea();
+            area = getAlgebraicInterior();
             
         }
         
@@ -405,7 +405,7 @@ public class Polygon2D extends ActiveContour
             // loop => keep only the contour with correct orientation
             // => the contour with a positive algebraic area
             
-            if (c1.getAlgebraicArea() < 0)
+            if (c1.getAlgebraicInterior() < 0)
             {
                 // c1 is the outer loop => keep it
                 points.clear();
@@ -763,7 +763,7 @@ public class Polygon2D extends ActiveContour
      * 
      * @return
      */
-    protected double getAlgebraicArea()
+    protected double getAlgebraicInterior()
     {
         int nm1 = points.size() - 1;
         double area = 0;
@@ -798,30 +798,30 @@ public class Polygon2D extends ActiveContour
             
             case 1: // perimeter
             {
-                Point3d p1;
-                Point3d p2;
-                double l = 0.0;
                 int size = points.size();
-                for (int i = 0; i < size; i++)
+                
+                Point3d p1 = points.get(size-1);
+                Point3d p2 = points.get(0);
+                
+                double perimeter = p1.distance(p2);
+                
+                for (int i = 0; i < size - 1; i++)
                 {
-                    p1 = points.get(i);
-                    p2 = points.get((i + 1) % size);
-                    l += Math.abs(p1.distance(p2));
+                    // shift pair of points by one index
+                    p1 = p2;
+                    p2 = points.get(i + 1);
+                    perimeter += p1.distance(p2);
                 }
-                return l;
+                
+                return perimeter;
             }
             case 2: // area
             {
-                return Math.abs(getAlgebraicArea());
+                return Math.abs(getAlgebraicInterior());
             }
             default:
                 throw new UnsupportedOperationException("Dimension " + order + " not implemented");
         }
-    }
-    
-    public ArrayList<Point3d> getPoints()
-    {
-        return points;
     }
     
     @Override
