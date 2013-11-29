@@ -742,11 +742,6 @@ public class Mesh3D extends ActiveContour
         }
     }
     
-    public ArrayList<Point3d> getPoints()
-    {
-        return points;
-    }
-    
     @Override
     protected void initFrom(ActiveContour contour)
     {
@@ -761,67 +756,77 @@ public class Mesh3D extends ActiveContour
         x /= n;
         y /= n;
     }
+        
+    public Point3d getMassCenter()
+    {
+        return new Point3d(getX(), getY(), getZ());
+    }
     
-    /**
-     * Tests whether the given point is inside the contour, and if so returns the penetration depth
-     * of this point. <br>
-     * This methods computes the number of intersections between the contour and a semi-infinite
-     * line starting from the contour center and passing through the given point. The point is thus
-     * considered inside if the number of intersections is odd (Jordan curve theorem).<br>
-     * Implementation note: the AWT Line2D class only provides a "segment to segment" intersection
-     * test instead of a "semi-infinite line to segment" test, meaning that one must "fake" a
-     * semi-infinite line using a big segment. This is done by building a segment originating from
-     * the given point and leaving in the opposite direction of the contour center. The full segment
-     * can be written in algebraic coordinates as
-     * 
-     * <pre>
-     * [PQ] where Q = P + n * CP
-     * </pre>
-     * 
-     * , where n is chosen arbitrarily large.
-     * 
-     * @param c
-     *            a contour
-     * @param p
-     *            a point to test
-     * @return true if the point is inside the contour
-     */
     public double contains(Point3d p)
     {
-        Point3d q = new Point3d(p.x + 10000 * (p.x - x), p.y + 10000 * (p.y - y), 0);
+        // FIXME this is *THE* hot-spot
         
-        int nb = 0;
-        int nbPtsM1 = points.size() - 1;
-        double dist = 0, minDist = Double.MAX_VALUE;
+        double epsilon = 1.0e-12;
+     
+        Vector3d edge1 = new Vector3d(), edge2 = new Vector3d();
+        Vector3d vp    = new Vector3d(), vt = new Vector3d(), vq = new Vector3d();
+        Vector3d ray = new Vector3d();
+
+        // the input point belongs to another mesh
+        // 1) trace a ray from that point outwards (away from my center)
+        // 2) count the intersections with my boundary
+        // 3) if the number is odd, the point is inside
+        // 4) if the point is inside, measure the distance to the edge
         
-        // all points but the last
-        for (int i = 0; i < nbPtsM1; i++)
+        //ray.negate(vTest.normal); // was supper buggy upon close contacts !
+        
+        // create a ray from the mass center to the given point
+        ray.sub(p, getMassCenter());
+        
+        double penetration = Double.MAX_VALUE;
+        int crossCount = 0;
+        
+        double det, u, v, distance;
+        
+        for (Face f : faces)
         {
-            Point3d p1 = points.get(i);
-            Point3d p2 = points.get(i + 1);
+            Point3d v1 = vertices.get(f.v1).position;
+            Point3d v2 = vertices.get(f.v2).position;
+            Point3d v3 = vertices.get(f.v3).position;
             
-            if (Line2D.linesIntersect(p1.x, p1.y, p2.x, p2.y, p.x, p.y, q.x, q.y))
-            {
-                nb++;
-                dist = Line2D.ptLineDist(p1.x, p1.y, p2.x, p2.y, p.x, p.y);
-                if (dist < minDist) minDist = dist;
-            }
+            edge1.sub(v3, v1);
+            edge2.sub(v2, v1);
+            
+            vp.cross(ray, edge2);
+            
+             det = edge1.dot(vp);
+            
+            if (det < epsilon) continue;
+            
+            vt.sub(p, v1);
+            
+             u = vt.dot(vp);
+            
+            if (u < 0 || u > det) continue;
+            
+            vq.cross(vt, edge1);
+            
+             v = ray.dot(vq);
+            
+            if (v < 0 || u + v > det) continue;
+            
+             distance = edge2.dot(vq) / det;
+            
+            if (distance < 0) continue;
+            
+            if (penetration > distance) penetration = distance;
+            
+            crossCount++;
         }
         
-        // last point
-        Point3d p1 = points.get(nbPtsM1);
-        Point3d p2 = points.get(0);
-        if (Line2D.linesIntersect(p1.x, p1.y, p2.x, p2.y, p.x, p.y, q.x, q.y))
-        {
-            nb++;
-            dist = Line2D.ptLineDist(p1.x, p1.y, p2.x, p2.y, p.x, p.y);
-            if (dist < minDist) minDist = dist;
-        }
-        
-        // return (nb % 2) == 0;
-        return (nb % 2 == 1) ? minDist : 0.0;
-        
+        return crossCount % 2 == 1 ? penetration : 0;
     }
+
     
     @Override
     public Iterator<Point3d> iterator()
@@ -830,7 +835,7 @@ public class Mesh3D extends ActiveContour
         
         return new Iterator<Point3d>()
         {
-            Iterator<Vertex> vertexIterator = vertices.iterator();
+            Iterator<Vertex> vertexIterator       = vertices.iterator();
             
             Vertex           next;
             
