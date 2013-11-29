@@ -22,6 +22,7 @@ import java.awt.geom.Line2D;
 import java.awt.geom.PathIterator;
 import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.Stack;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 
@@ -31,6 +32,10 @@ import javax.vecmath.Vector3d;
 
 import plugins.adufour.activecontours.Mesh3D.Face;
 import plugins.adufour.activecontours.Mesh3D.Vertex;
+import plugins.adufour.activemeshes.mesh.ContourSplittingException;
+import plugins.adufour.activemeshes.mesh.Mesh;
+import plugins.adufour.activemeshes.mesh.MeshException;
+import plugins.adufour.activemeshes.mesh.MeshSplittingException;
 import plugins.adufour.ezplug.EzException;
 import plugins.adufour.ezplug.EzVarDouble;
 import plugins.adufour.ezplug.EzVarInteger;
@@ -940,25 +945,31 @@ public class Mesh3D extends ActiveContour
         }
     }
     
-    AnnounceFrame f = null; // new AnnounceFrame("ready");
-                            
     @Override
     public void paint(Graphics2D g, Sequence sequence, IcyCanvas canvas)
     {
-        if (getT() != canvas.getPositionT() || !enabled || g == null) return;
-        
-        float fontSize = (float) canvas.canvasToImageLogDeltaX(30);
-        g.setFont(new Font("Trebuchet MS", Font.BOLD, 10).deriveFont(fontSize));
-        
-        double stroke = Math.max(canvas.canvasToImageLogDeltaX(3), canvas.canvasToImageLogDeltaY(3));
-        
-        g.setStroke(new BasicStroke((float) stroke, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-        
-        g.setColor(getColor());
-        
-        synchronized (path)
+        if (g != null)
         {
-            g.draw(path);
+            // 2D viewer
+            
+            if (getT() != canvas.getPositionT() || !enabled || g == null) return;
+            
+            float fontSize = (float) canvas.canvasToImageLogDeltaX(30);
+            g.setFont(new Font("Trebuchet MS", Font.BOLD, 10).deriveFont(fontSize));
+            
+            double stroke = Math.max(canvas.canvasToImageLogDeltaX(3), canvas.canvasToImageLogDeltaY(3));
+            
+            g.setStroke(new BasicStroke((float) stroke, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            
+            g.setColor(getColor());
+            
+            // FIXME draw something in 2D (points? raster mesh?)
+        }
+        else
+        {
+            // 3D viewer
+            
+            // nothing to do here (the VTK viewer should update itself automatically)
         }
     }
     
@@ -981,94 +992,248 @@ public class Mesh3D extends ActiveContour
         double minLength = contour_resolution.getValue() * minFactor;
         double maxLength = contour_resolution.getValue() * maxFactor;
         
-        // optimization to avoid multiple points.size() calls (WARNING: n must
-        // be updated manually whenever points is changed)
-        int n = points.size();
+        // if there are 2 faces only in the mesh, it should be destroyed
         
-        if (contourNormals == null)
+        if (faces.size() == 2)
         {
-            // first pass: update normals once
-            contourNormals = new Vector3d[n];
-            for (int i = 0; i < n; i++)
-                contourNormals[i] = new Vector3d();
-            normalsNeedUpdate = true;
-            updateNormalsIfNeeded();
+            throw new TopologyException(this, null);
         }
         
-        Polygon2D[] children = checkSelfIntersection(contour_resolution.getValue(), contour_minArea.getValue());
+        // FIXME proper self-intersection (not just division)
         
-        if (children != null) throw new TopologyException(this, children);
-        
-        // update the number of total points
-        n = points.size();
         boolean noChange = false;
+        
+        int cpt = -1;
         
         while (noChange == false)
         {
             noChange = true;
             
-            // all points but the last
-            for (int i = 0; i < n - 1; i++)
+            cpt++;
+            
+            // we are looking for 2 faces f1 = a-b-c1 and f2 = b-a-c2
+            // such that they share an edge a-b that is either
+            // - shorter than the low-threshold (resolution * min)
+            // or
+            // - longer than the high-threshold (resolution * max)
+            
+            for (int i = 0; i < faces.size(); i++)
             {
-                if (n < 4) return;
+                boolean split = false, merge = false;
                 
-                Point3d pt1 = points.get(i);
-                Point3d pt2 = points.get(i + 1);
+                Face f1 = faces.get(i);
+                Integer v1 = 0, v2 = 0, f1v3 = 0;
                 
-                double distance = pt1.distance(pt2);
+                // Check all edges of this face
                 
-                if (distance < minLength)
+                Integer[] f1v123 = { f1.v1, f1.v2, f1.v3 };
+                Integer[] f1v231 = { f1.v2, f1.v3, f1.v1 };
+                Integer[] f1v312 = { f1.v3, f1.v1, f1.v2 };
+                
+                for (int v = 0; v < 3; v++)
                 {
-                    noChange = false;
-                    pt2.set((pt1.x + pt2.x) * 0.5, (pt1.y + pt2.y) * 0.5, 0);
-                    points.remove(i);
-                    i--; // comes down to i-1+1 when looping
-                    n--;
-                }
-                else if (distance > maxLength)
-                {
-                    noChange = false;
+                    v1 = f1v123[v];
+                    v2 = f1v231[v];
+                    f1v3 = f1v312[v];
                     
-                    points.add(i + 1, new Point3d((pt1.x + pt2.x) * 0.5, (pt1.y + pt2.y) * 0.5, 0));
-                    i++; // comes down to i+=2 when looping
-                    n++;
+                    double edgeLength = vertices.get(v1).position.distance(vertices.get(v2).position);
+                    
+                    if (edgeLength < minLength)
+                    {
+                        merge = true;
+                        break;
+                    }
+                    
+                    if (edgeLength > maxLength)
+                    {
+                        split = true;
+                        break;
+                    }
                 }
-            }
-            
-            // last point
-            Point3d pt1 = points.get(n - 1);
-            Point3d pt2 = points.get(0);
-            
-            if (pt1.distance(pt2) < minLength)
-            {
+                
+                if (split == merge) // both are false
+                {
+                    continue; // to the next face
+                }
+                
+                // If the code runs here, a change will occur
                 noChange = false;
-                pt2.set((pt1.x + pt2.x) * 0.5, (pt1.y + pt2.y) * 0.5, 0);
-                points.remove(n - 1);
-                n--;
+                
+                // => we need the second associated face for that edge
+                
+                Face f2 = null;
+                Integer f2v3 = -1;
+                
+                // start from the current face => O(N)
+                for (int j = i + 1; j < faces.size(); j++)
+                {
+                    f2 = faces.get(j);
+                    
+                    // check if f2 contains [v1-v2]
+                    if (v1.compareTo(f2.v1) == 0 && v2.compareTo(f2.v3) == 0)
+                    {
+                        f2v3 = f2.v2;
+                        break;
+                    }
+                    else if (v1.compareTo(f2.v2) == 0 && v2.compareTo(f2.v1) == 0)
+                    {
+                        f2v3 = f2.v3;
+                        break;
+                    }
+                    else if (v1.compareTo(f2.v3) == 0 && v2.compareTo(f2.v2) == 0)
+                    {
+                        f2v3 = f2.v1;
+                        break;
+                    }
+                }
+                
+                // CASE 0: THE MESH IS INCONSISTENT //
+                
+                if (f2v3.compareTo(0) < 0)
+                {
+                    // should never happen:
+                    // if f2 does not exist, then [v1-v2] only belongs to a single face (f1)
+                    // => this means the mesh is inconsistent (not closed)
+                    
+                    System.err.println("Problem in face " + i + ":");
+                    System.err.print("  " + f1.v1.intValue() + " : ");
+                    for (Integer nn : vertices.get(v1).neighbors)
+                        System.err.print(nn.intValue() + "  ");
+                    System.err.println();
+                    System.err.print("  " + f1.v2.intValue() + " : ");
+                    for (Integer nn : vertices.get(v2).neighbors)
+                        System.err.print(nn.intValue() + "  ");
+                    System.err.println();
+                    System.err.print("  " + f1.v3.intValue() + " : ");
+                    for (Integer nn : vertices.get(f1.v3).neighbors)
+                        System.err.print(nn.intValue() + "  ");
+                    System.err.println();
+                    
+                    System.err.println("The mesh is removed from further computations");
+                    
+                    throw new TopologyException(this, null);
+                }
+                
+                // CASE 1: MERGE //
+                
+                else if (merge)
+                {
+                    // Check first if the edge to merge is at the base of a tetrahedron
+                    // if so, delete the whole tetrahedron
+                    
+                    if (vertices.get(f1v3).neighbors.size() == 3)
+                    {
+                        deleteTetrahedron(f1v3, v1, v2);
+                        return;
+                    }
+                    if (vertices.get(f2v3).neighbors.size() == 3)
+                    {
+                        deleteTetrahedron(f2v3, v2, v1);
+                        return;
+                    }
+                    
+                    Vertex vx1 = vertices.get(v1);
+                    Vertex vx2 = vertices.get(v2);
+                    
+                    for (Integer n : vx1.neighbors)
+                        if (vx2.neighbors.contains(n) && n.compareTo(f1v3) != 0 && n.compareTo(f2v3) != 0)
+                        {
+                            splitContourAtVertices(v1, v2, n);
+                            return;
+                        }
+                    
+                    // Here, the normal merge operation can be implemented
+                    
+                    // remove the 2 faces
+                    faces.remove(f1);
+                    faces.remove(f2);
+                    
+                    // move v1 to the middle of v1-v2
+                    vx1.position.interpolate(vx2.position, 0.5);
+                    
+                    // remove v2 from its neighborhood...
+                    for (Integer n : vx2.neighbors)
+                    {
+                        Vertex vxn = vertices.get(n);
+                        if (vxn == null) continue;
+                        vxn.neighbors.remove(v2);
+                        
+                        // ...and add v2's neighbors to v1
+                        // except for f1v3 and f2v3 and ... v1 !
+                        if (n.compareTo(f1v3) != 0 && n.compareTo(f2v3) != 0 && n.compareTo(v1) != 0)
+                        {
+                            vx1.neighbors.add(n);
+                            vxn.neighbors.add(v1);
+                        }
+                    }
+                    
+                    // all the faces pointing to v2 must now point to v1
+                    for (Face f : faces)
+                    {
+                        if (f.v1.compareTo(v2) == 0)
+                        {
+                            f.v1 = v1;
+                        }
+                        else if (f.v2.compareTo(v2) == 0)
+                        {
+                            f.v2 = v1;
+                        }
+                        else if (f.v3.compareTo(v2) == 0)
+                        {
+                            f.v3 = v1;
+                        }
+                    }
+                    
+                    // delete everything
+                    vertices.set(v2, null);
+                    
+                }
+                
+                // CASE 2: SPLIT //
+                
+                else
+                {
+                    // 1) remove the old faces
+                    faces.remove(f1);
+                    faces.remove(f2);
+                    
+                    // 2) remove the vertices from their mutual neighbor list
+                    vertices.get(v1).neighbors.remove(v2);
+                    vertices.get(v2).neighbors.remove(v1);
+                    
+                    // check if the edge should just be inverted
+                    
+                    Vertex vx1 = vertices.get(f1v3);
+                    Vertex vx2 = vertices.get(f2v3);
+                    
+                    if (!vx1.neighbors.contains(f2v3) && vx1.distanceTo(vx2) < maxLength)
+                    {
+                        // just invert the edge
+                        
+                        // 3) create the two new faces
+                        addFace(f1v3, v1, f2v3);
+                        addFace(f2v3, v2, f1v3);
+                    }
+                    else
+                    {
+                        // split the edge and its faces
+                        
+                        // 3) create a vertex in the middle of the edge
+                        Integer c = addVertexBetween(v1, v2);
+                        
+                        // 4) create 4 new faces around the new vertex
+                        addFace(v1, c, f1v3);
+                        addFace(f1v3, c, v2);
+                        addFace(v1, f2v3, c);
+                        addFace(c, f2v3, v2);
+                    }
+                }
+                
+                break;
             }
-            else if (pt1.distance(pt2) > maxLength)
-            {
-                noChange = false;
-                points.add(new Point3d((pt1.x + pt2.x) * 0.5, (pt1.y + pt2.y) * 0.5, 0));
-                n++;
-            }
-        }
-        
-        // re-sampling is done => update internal structures
-        
-        final int nbPoints = n;
-        if (modelForces == null || modelForces.length != nbPoints)
-        {
-            modelForces = new Vector3d[nbPoints];
-            contourNormals = new Vector3d[nbPoints];
-            feedbackForces = new Vector3d[nbPoints];
             
-            for (int i = 0; i < nbPoints; i++)
-            {
-                modelForces[i] = new Vector3d();
-                contourNormals[i] = new Vector3d();
-                feedbackForces[i] = new Vector3d();
-            }
+            // prevent infinite loop
+            if (cpt > vertices.size()) noChange = true;
         }
         
         updatePath();
@@ -1077,33 +1242,323 @@ public class Mesh3D extends ActiveContour
         boundingSphereNeedsUpdate = true;
     }
     
+    public void addFace(Integer v1, Integer v2, Integer v3) throws TopologyException
+    {
+        if (v1.compareTo(v2) == 0 || v1.compareTo(v3) == 0 || v2.compareTo(v3) == 0) throw new TopologyException(this, null);
+        
+        if (v1 < 0) v1 = -v1 - 1;
+        if (v2 < 0) v2 = -v2 - 1;
+        if (v3 < 0) v3 = -v3 - 1;
+        
+        {
+            Vertex v = vertices.get(v1);
+            if (!v.neighbors.contains(v2)) v.neighbors.add(v2);
+            if (!v.neighbors.contains(v3)) v.neighbors.add(v3);
+        }
+        {
+            Vertex v = vertices.get(v2);
+            if (!v.neighbors.contains(v1)) v.neighbors.add(v1);
+            if (!v.neighbors.contains(v3)) v.neighbors.add(v3);
+        }
+        {
+            Vertex v = vertices.get(v3);
+            if (!v.neighbors.contains(v1)) v.neighbors.add(v1);
+            if (!v.neighbors.contains(v2)) v.neighbors.add(v2);
+        }
+        
+        faces.add(new Face(v1, v2, v3));
+    }
+    
+    /**
+     * If it doens't exist, adds a new vertex in the center of the specified vertices to the vertex
+     * list
+     * 
+     * @param point
+     *            the point to add
+     * @return A signed integer i defined as follows: <br>
+     *         i>=0 : vertex is new and stored at position i <br>
+     *         i<0 : vertex already existed at position -(i+1)
+     */
+    public Integer addVertex(Point3d point)
+    {
+        Integer index, nullIndex = -1;
+        
+        for (index = 0; index < vertices.size(); index++)
+        {
+            Vertex v = vertices.get(index);
+            
+            if (v == null)
+            {
+                // The current position in the vertex list is null.
+                // To avoid growing the data array, this position
+                // can be reused to store a new vertex if needed
+                nullIndex = index;
+                continue;
+            }
+            
+            if (v.position.distanceSquared(point) < contour_resolution.getValue() * 0.00001) return -index - 1;
+        }
+        
+        // if code runs until here, the vertex must be created
+        Vertex v = new Vertex(new Point3d(point));
+        
+        // if there is a free spot in the ArrayList, use it
+        if (nullIndex >= 0)
+        {
+            index = nullIndex;
+            vertices.set(index, v);
+        }
+        else
+        {
+            vertices.add(v);
+        }
+        
+        return index;
+    }
+    
+    /**
+     * If it doens't exist, adds a new vertex in the center of the specified vertices to the vertex
+     * list
+     * 
+     * @param v1
+     *            the first vertex index
+     * @param v2
+     *            the second vertex index
+     * @return A signed integer i defined as follows: <br>
+     *         i>=0 : vertex is new and stored at position i <br>
+     *         i<0 : vertex already existed at position -(i+1)
+     */
+    private Integer addVertexBetween(Integer v1, Integer v2)
+    {
+        Point3d newPosition = new Point3d(vertices.get(v1).position);
+        newPosition.interpolate(vertices.get(v2).position, 0.5);
+        
+        return addVertex(newPosition);
+    }
+    
+    /**
+     * Deletes a tetrahedron from the mesh, and fill the hole with a new face
+     * 
+     * @param topv
+     *            the vertex at the top of the tetrahedron
+     * @param v1
+     *            one of the three vertices at the base of the tetrahedron
+     * @param v2
+     *            another of the vertices at the base of the tetrahedron
+     */
+    private void deleteTetrahedron(Integer topv, Integer v1, Integer v2)
+    {
+        // find the third bottom vertex
+        Integer v3 = -1;
+        for (Integer n : vertices.get(topv).neighbors)
+        {
+            if (n.compareTo(v1) == 0 || n.compareTo(v2) == 0) continue;
+            v3 = n;
+            break;
+        }
+        
+        // remove the top vertex from the neighborhood
+        vertices.get(v1).neighbors.remove(topv);
+        vertices.get(v2).neighbors.remove(topv);
+        vertices.get(v3).neighbors.remove(topv);
+        
+        // delete the top vertex
+        vertices.set(topv, null);
+        
+        // find the three faces and delete them
+        for (int i = 0; i < faces.size(); i++)
+        {
+            Face f = faces.get(i);
+            if (f.v1.compareTo(topv) == 0 || f.v2.compareTo(topv) == 0 || f.v3.compareTo(topv) == 0) faces.remove(i--);
+        }
+        
+        // create the new face to close the hole left by the tetrahedron
+        faces.add(new Face(v1, v2, v3));
+    }
+    
+    private void extractVertices(Integer seedIndex, ArrayList<Integer> visitedIndices, ArrayList<Vertex> oldPoints, ArrayList<Vertex> newPoints)
+    {
+        Stack<Integer> seeds = new Stack<Integer>();
+        seeds.add(seedIndex);
+        
+        while (!seeds.isEmpty())
+        {
+            Integer seed = seeds.pop();
+            
+            if (visitedIndices.contains(seed)) continue;
+            
+            visitedIndices.add(seed);
+            Vertex v = oldPoints.get(seed);
+            newPoints.set(seed, v);
+            
+            for (int i = 0; i < v.neighbors.size(); i++)
+            {
+                Integer n = v.neighbors.get(i);
+                if (oldPoints.get(n) == null)
+                {
+                    v.neighbors.remove(n);
+                    i--;
+                    continue;
+                }
+                seeds.push(n);
+            }
+        }
+    }
+    
+    private void extractFaces(ArrayList<Vertex> pointsList, ArrayList<Face> sourceFacesList, ArrayList<Face> targetFacesList)
+    {
+        for (int i = 0; i < sourceFacesList.size(); i++)
+        {
+            Face f = sourceFacesList.get(i);
+            
+            if (pointsList.get(f.v1) != null || pointsList.get(f.v2) != null || pointsList.get(f.v3) != null)
+            {
+                targetFacesList.add(f);
+                sourceFacesList.remove(i--);
+            }
+        }
+    }
+    
+    /**
+     * Splits the current contour using the 'cutting' face defined by the given vertices. <br>
+     * 
+     * <pre>
+     * How this works:
+     *  - separate all vertices on each side of the cutting face (without considering the vertices of the cutting face), 
+     *  - separate all faces touching at least one vertex of each group (will include faces touching the cutting face),
+     *  - create a contour with each group of vertices and faces,
+     *  - add the cutting face and its vertices to each created contour
+     * </pre>
+     * 
+     * @param v1
+     * @param v2
+     * @param v3
+     * @throws TopologyException
+     * 
+     */
+    private void splitContourAtVertices(Integer v1, Integer v2, Integer v3) throws TopologyException
+    {
+        Mesh3D[] children = new Mesh3D[2];
+        
+        ArrayList<Integer> visitedIndexes = new ArrayList<Integer>(vertices.size());
+        visitedIndexes.add(v1);
+        visitedIndexes.add(v2);
+        visitedIndexes.add(v3);
+        
+        int seed;
+        
+        for (int child = 0; child < 2; child++)
+        {
+            // pick any non-null and non-visited vertex as seed
+            for (seed = 0; seed < vertices.size(); seed++)
+                if (vertices.get(seed) != null && !visitedIndexes.contains(seed)) break;
+            
+            if (seed == vertices.size())
+            {
+                System.err.println("Mesh splitting error (pass " + (child + 1) + "): no valid seed found");
+                throw new TopologyException(this, null);
+            }
+            
+            ArrayList<Face> newFaces = new ArrayList<Face>();
+            ArrayList<Vertex> newPoints = new ArrayList<Vertex>(vertices.size());
+            for (int i = 0; i < vertices.size(); i++)
+                newPoints.add(null);
+            
+            extractVertices(seed, visitedIndexes, vertices, newPoints);
+            extractFaces(newPoints, faces, newFaces);
+            
+            // Add the vertices of the cutting face
+            for (Integer v : new Integer[] { v1, v2, v3 })
+            {
+                Vertex vx = vertices.get(v);
+                
+                if (vx == null) System.err.println(v.intValue() + " is null");
+                
+                // create a clone for each vertex (position and neighbors)
+                Vertex newV = new Vertex(vertices.get(v));
+                
+                // check the neighborhood to remove the neighbors that belong to
+                // the other mesh
+                // (these neighbors will point to null in the current point
+                // list)
+                for (int i = 0; i < newV.neighbors.size(); i++)
+                {
+                    Integer n = newV.neighbors.get(i);
+                    if (n.compareTo(v1) != 0 && n.compareTo(v2) != 0 && n.compareTo(v3) != 0 && newPoints.get(n) == null)
+                    {
+                        newV.neighbors.remove(n);
+                        i--;
+                    }
+                }
+                newPoints.set(v, newV);
+            }
+            
+            for (Face f : newFaces)
+                if (f.contains(v1) && f.contains(v2))
+                {
+                    // if the edge v1-v2 appears counter-clockwisely in f,
+                    // the new face must be clockwise and vice-versa
+                    newFaces.add(f.isCounterClockwise(v1, v2) ? new Face(v1, v3, v2) : new Face(v1, v2, v3));
+                    break;
+                }
+            
+            Mesh3D newContour = new Mesh(newPoints, newFaces, mesh.getResolution(), mesh.getVTKMesh() != null);
+            
+            newContour.setT(getT());
+            newContour.updateMassCenter();
+            
+            if (newContour.getDimension(2) >= contour_minArea.getValue()) children[child] = newContour;
+        }
+        
+        if (children[0] == null)
+        {
+            if (children[1] == null) throw new TopologyException(this, null);
+        }
+        else
+        {
+            if (children[1] != null) throw new TopologyException(this, children);
+        }
+    }
+    
     protected void updateNormalsIfNeeded()
     {
         if (!normalsNeedUpdate) return;
         
-        int n = points.size();
+        Vector3d v31 = new Vector3d();
+        Vector3d v12 = new Vector3d();
+        Vector3d v23 = new Vector3d();
         
-        // first point
+        for (Face f : faces)
         {
-            Point3d p1 = points.get(n - 1);
-            Point3d p2 = points.get(1);
-            contourNormals[0].normalize(new Vector3d(p2.y - p1.y, p1.x - p2.x, 0));
+            // Accumulate face normals in each vertex
+            
+            Vertex v1 = vertices.get(f.v1);
+            Vertex v2 = vertices.get(f.v2);
+            Vertex v3 = vertices.get(f.v3);
+            
+            v31.sub(v1.position, v3.position);
+            v12.sub(v2.position, v1.position);
+            v23.sub(v3.position, v2.position);
+            
+            // normal at v1 = [v1 v2] ^ [v1 v3] = [v3 v1] ^ [v1 v2]
+            v1.normal.x += v31.y * v12.z - v31.z * v12.y;
+            v1.normal.y += v31.z * v12.x - v31.x * v12.z;
+            v1.normal.z += v31.x * v12.y - v31.y * v12.x;
+            
+            // normal at v2 = [v2 v3] ^ [v2 v1] = [v1 v2] ^ [v2 v3]
+            v2.normal.x += v12.y * v23.z - v12.z * v23.y;
+            v2.normal.y += v12.z * v23.x - v12.x * v23.z;
+            v2.normal.z += v12.x * v23.y - v12.y * v23.x;
+            
+            // normal at v3 = [v3 v1] ^ [v3 v2] = [v2 v3] ^ [v3 v1]
+            v3.normal.x += v23.y * v31.z - v23.z * v31.y;
+            v3.normal.y += v23.z * v31.x - v23.x * v31.z;
+            v3.normal.z += v23.x * v31.y - v23.y * v31.x;
         }
         
-        // middle points
-        for (int i = 1; i < n - 1; i++)
-        {
-            Point3d p1 = points.get(i - 1);
-            Point3d p2 = points.get(i + 1);
-            contourNormals[i].normalize(new Vector3d(p2.y - p1.y, p1.x - p2.x, 0));
-        }
-        
-        // last point
-        {
-            Point3d p1 = points.get(n - 2);
-            Point3d p2 = points.get(0);
-            contourNormals[n - 1].normalize(new Vector3d(p2.y - p1.y, p1.x - p2.x, 0));
-        }
+        // Normalize the accumulated normals
+        for (Vertex v : vertices)
+            if (v != null) v.normal.normalize();
         
         normalsNeedUpdate = false;
     }
@@ -1401,6 +1856,16 @@ public class Mesh3D extends ActiveContour
             this(position, neighbors.size());
             for (Integer i : neighbors)
                 this.neighbors.add(new Integer(i));
+        }
+        
+        public double distanceTo(Vertex v)
+        {
+            return distanceTo(v.position);
+        }
+        
+        public double distanceTo(Point3d p)
+        {
+            return position.distance(p);
         }
         
         public String toString()
