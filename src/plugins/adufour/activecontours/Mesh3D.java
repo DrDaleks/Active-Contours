@@ -85,7 +85,7 @@ public class Mesh3D extends ActiveContour
         // in any case, don't forget to close the path
         updatePath();
         
-        counterClockWise = (getAlgebraicArea() > 0);
+        counterClockWise = (getAlgebraicInterior() > 0);
     }
     
     public Mesh3D(ActiveContours owner, EzVarDouble contour_resolution, EzVarInteger contour_minArea, SlidingWindow convergenceWindow, ROI2D roi)
@@ -120,7 +120,7 @@ public class Mesh3D extends ActiveContour
             }
             else
             {
-                area = getAlgebraicArea();
+                area = getAlgebraicInterior();
                 if (Math.abs(area) < contour_minArea.getValue())
                 {
                     roi = new ROI2DEllipse(roi.getBounds2D());
@@ -175,7 +175,7 @@ public class Mesh3D extends ActiveContour
             
             updatePath();
             
-            area = getAlgebraicArea();
+            area = getAlgebraicInterior();
             
         }
         
@@ -327,7 +327,7 @@ public class Mesh3D extends ActiveContour
             // loop => keep only the contour with correct orientation
             // => the contour with a positive algebraic area
             
-            if (c1.getAlgebraicArea() < 0)
+            if (c1.getAlgebraicInterior() < 0)
             {
                 // c1 is the outer loop => keep it
                 points.clear();
@@ -678,63 +678,64 @@ public class Mesh3D extends ActiveContour
         return value;
     }
     
-    /**
-     * Computes the algebraic area of the current contour. The returned value is negative if the
-     * contour points are order clockwise and positive if ordered counter-clockwise. The contour's
-     * surface is just the absolute value of this algebraic surface
-     * 
-     * @return
-     */
-    protected double getAlgebraicArea()
-    {
-        int nm1 = points.size() - 1;
-        double area = 0;
-        
-        // all points but the last
-        for (int i = 0; i < nm1; i++)
-        {
-            Point3d p1 = points.get(i);
-            Point3d p2 = points.get(i + 1);
-            area += (p2.x * p1.y - p1.x * p2.y) * 0.5;
-        }
-        
-        // last point
-        Point3d p1 = points.get(nm1);
-        Point3d p2 = points.get(0);
-        area += (p2.x * p1.y - p1.x * p2.y) * 0.5;
-        
-        return area;
-    }
-    
     public double getDimension(int order)
     {
-        if (points.size() <= 1) return 0;
-        
         switch (order)
         {
-        
             case 0: // number of points
             {
-                return points.size();
+                int nbPts = 0;
+                
+                for (Vertex v : vertices)
+                    if (v != null) nbPts++;
+                
+                return nbPts;
             }
-            
-            case 1: // perimeter
+            case 1:
+            case 2: // surface and volume are both computed as algebraic sums
+                // over each face
             {
-                Point3d p1;
-                Point3d p2;
-                double l = 0.0;
-                int size = points.size();
-                for (int i = 0; i < size; i++)
+                double surface = 0, volume = 0;
+                
+                Vector3d v12 = new Vector3d();
+                Vector3d v13 = new Vector3d();
+                Vector3d cross = new Vector3d();
+                
+                Vector3d v1 = new Vector3d();
+                Vector3d v2 = new Vector3d();
+                Vector3d v3 = new Vector3d();
+                
+                for (Face f : faces)
                 {
-                    p1 = points.get(i);
-                    p2 = points.get((i + 1) % size);
-                    l += Math.abs(p1.distance(p2));
+                    v1.set(vertices.get(f.v1).position);
+                    v2.set(vertices.get(f.v2).position);
+                    v3.set(vertices.get(f.v3).position);
+                    
+                    v12.sub(v2, v1);
+                    v13.sub(v3, v1);
+                    
+                    cross.cross(v12, v13);
+                    
+                    double surf = cross.length() * 0.5f;
+                    
+                    if (order == 1)
+                    {
+                        surface += surf;
+                    }
+                    else
+                    {
+                        cross.normalize();
+                        
+                        // from the divergence theorem:
+                        // V = sum_i( surface_of_i * normal_of_i 'dot' any_point_in_i ) / 3
+                        
+                        volume += surf * cross.dot(v1) / 3.0;
+                    }
+                    
                 }
-                return l;
-            }
-            case 2: // area
-            {
-                return Math.abs(getAlgebraicArea());
+                
+                double value = (order == 1) ? surface : volume;
+                return value;
             }
             default:
                 throw new UnsupportedOperationException("Dimension " + order + " not implemented");
@@ -825,7 +826,48 @@ public class Mesh3D extends ActiveContour
     @Override
     public Iterator<Point3d> iterator()
     {
-        return points.iterator();
+        // return a "tweaked" iterator that will skip null entries automatically
+        
+        return new Iterator<Point3d>()
+        {
+            Iterator<Vertex> vertexIterator = vertices.iterator();
+            
+            Vertex           next;
+            
+            boolean          hasNext;
+            
+            boolean          hasNextWasCalledOnce = false;
+            
+            @Override
+            public void remove()
+            {
+                vertexIterator.remove();
+            }
+            
+            @Override
+            public Point3d next()
+            {
+                hasNextWasCalledOnce = false;
+                return next.position;
+            }
+            
+            @Override
+            public boolean hasNext()
+            {
+                if (hasNextWasCalledOnce) return hasNext;
+                
+                hasNextWasCalledOnce = true;
+                
+                if (!vertexIterator.hasNext()) return false;
+                
+                do
+                {
+                    next = vertexIterator.next();
+                } while (next == null && vertexIterator.hasNext());
+                
+                return next != null;
+            }
+        };
     }
     
     void move(ROI field, double timeStep)
