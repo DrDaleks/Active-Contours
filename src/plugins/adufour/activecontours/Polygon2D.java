@@ -7,6 +7,7 @@ import icy.roi.ROI;
 import icy.roi.ROI2D;
 import icy.sequence.Sequence;
 import icy.type.DataType;
+import icy.util.StringUtil;
 
 import java.awt.BasicStroke;
 import java.awt.Color;
@@ -429,6 +430,7 @@ public class Polygon2D extends ActiveContour
     {
         IcyBufferedImage data = imageData_float.getImage(0, 0);
         float[] _data = data.getDataXYAsFloat(channel);
+        byte[] _mask = buffer_data.getDataXYAsByte(0, 0, 0);
         
         int sizeX = data.getWidth();
         int sizeY = data.getHeight();
@@ -455,6 +457,7 @@ public class Polygon2D extends ActiveContour
             {
                 if (bounds.contains(i, j) && path.contains(i, j))
                 {
+                    _mask[offset] = 1;
                     double value = _data[offset];
                     inSum += value;
                     inCpt++;
@@ -469,7 +472,7 @@ public class Polygon2D extends ActiveContour
         }
         
         cin = inSum / inCpt;
-        cout = outSum / outCpt;
+        // cout = outSum / outCpt;
         return cin;
     }
     
@@ -586,7 +589,9 @@ public class Polygon2D extends ActiveContour
     @Override
     void computeRegionForces(Sequence imageData, int channel, double weight, double sensitivity, double cin, double cout)
     {
-        // uncomment these 2 lines for mean-based information
+        this.cout = cout;
+        this.cin = cin;
+        
         sensitivity = sensitivity / Math.max(cout, cin);
         
         updateNormalsIfNeeded();
@@ -610,10 +615,12 @@ public class Polygon2D extends ActiveContour
             // bounds check
             if (p.x < 1 || p.y < 1 || p.x >= width - 1 || p.y >= height - 1) continue;
             
-            // invert the following lines for mean-based information
             val = getPixelValue(data, width, height, p.x, p.y);
             inDiff = val - cin;
+            // inDiff *= inDiff;
             outDiff = val - cout;
+            // outDiff *= outDiff;
+            
             sum = weight * contour_resolution.getValue() * (sensitivity * (outDiff * outDiff) - (inDiff * inDiff));
             
             if (counterClockWise)
@@ -711,6 +718,7 @@ public class Polygon2D extends ActiveContour
                 if ((penetration = target.contains(p)) > 0)
                 {
                     feedbackForce.scaleAdd(-penetration, contourNormals[index], feedbackForce);
+                    modelForces[index].set(0, 0, 0);
                 }
             }
             index++;
@@ -800,7 +808,7 @@ public class Polygon2D extends ActiveContour
             {
                 int size = points.size();
                 
-                Point3d p1 = points.get(size-1);
+                Point3d p1 = points.get(size - 1);
                 Point3d p2 = points.get(0);
                 
                 double perimeter = p1.distance(p2);
@@ -985,6 +993,8 @@ public class Polygon2D extends ActiveContour
         {
             g.draw(path);
         }
+        // this line displays the average intensity inside the object
+        // g.drawString(StringUtil.toString(cin, 2), (float)getX(), (float)getY());
     }
     
     /**
