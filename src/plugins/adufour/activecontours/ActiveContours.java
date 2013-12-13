@@ -17,7 +17,6 @@ import icy.system.SystemUtil;
 import icy.system.thread.ThreadUtil;
 import icy.type.DataType;
 import icy.util.ShapeUtil.BooleanOperator;
-import icy.util.StringUtil;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -796,7 +795,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             if (output_rois.getValue())
             {
                 ROI roi = contour.toROI();
-                roi.setName("[T=" + StringUtil.toString(t, 1 + (int) Math.round(Math.log10(inputData.getSizeT()))) + "] Object #" + i);
+                roi.setName("Object #" + i);
                 
                 // // merge with existing ROI
                 // if (rois.containsKey(segment))
