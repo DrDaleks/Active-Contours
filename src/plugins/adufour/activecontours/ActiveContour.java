@@ -171,6 +171,8 @@ public abstract class ActiveContour extends Detection implements Iterable<Point3
     
     abstract void computeInternalForces(double weight);
     
+    abstract void computeVolumeConstraint(double targetVolume);
+    
     /**
      * Computes the feedback forces yielded by the penetration of the current contour into the
      * target contour

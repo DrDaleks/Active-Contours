@@ -104,7 +104,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     private Sequence                       contourMask_buffer    = new Sequence("Mask data");
     
     private Sequence                       region_data;
-    private HashMap<ActiveContour, Double> region_cin            = new HashMap<ActiveContour, Double>(0);
+    private HashMap<TrackSegment, Double> region_cin            = new HashMap<TrackSegment, Double>(0);
     private double                         region_cout;
     
     private VarROIArray                    roiInput              = new VarROIArray("input ROI");
@@ -282,6 +282,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             if (Thread.currentThread().isInterrupted()) break;
             
             if (globalStop) break;
+            
         }
         
         if (getUI() != null)
@@ -413,7 +414,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                                 }
                                 synchronized (region_cin)
                                 {
-                                    region_cin.put(contour, 0.0);
+                                    region_cin.put(segment, 0.0);
                                 }
                             }
                         }
@@ -434,7 +435,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                             }
                             synchronized (region_cin)
                             {
-                                region_cin.put(contour, 0.0);
+                                region_cin.put(segment, 0.0);
                             }
                         }
                     }
@@ -473,6 +474,17 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 ActiveContour clone = ((ActiveContour) previous).clone();
                 clone.setT(t);
                 segment.addDetection(clone);
+                
+                if (volumes.containsKey(segment))
+                {
+                    // un-comment to store volumes after each frame
+                     volumes.put(segment, ((ActiveContour) previous).getDimension(2));
+                }
+                else
+                {
+                    // new volume (after first image was processed)
+                    volumes.put(segment, clone.getDimension(2));
+                }
             }
         }
     }
@@ -519,7 +531,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             {
                 Double criterion = contour.convergence.computeCriterion(convergence_operation.getValue());
                 
-                if (criterion != null && criterion < convergence_criterion.getValue() / 10)
+                if (criterion != null && criterion < convergence_criterion.getValue() / 100)
                 {
                     nbConvergedContours++;
                     continue;
@@ -554,6 +566,8 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         }
     }
     
+    HashMap<TrackSegment, Double> volumes = new HashMap<TrackSegment, Double>();
+    
     /**
      * Deform contours together (coupling involved)
      * 
@@ -568,6 +582,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             // no multi-threading needed
             
             ActiveContour contour = evolvingContours.iterator().next();
+            TrackSegment segment = trackGroup.getTrackSegmentWithDetection(contour);
             
             if (Math.abs(edge_weight.getValue()) > EPSILON) contour.computeEdgeForces(edgeData, edge_c.getValue(), edge_weight.getValue());
             
@@ -575,14 +590,20 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             
             if (region_weight.getValue() > EPSILON)
             {
-                if (!region_cin.containsKey(contour)) region_cin.put(contour, contour.computeAverageIntensity(region_data, region_c.getValue(), contourMask_buffer));
+                if (!region_cin.containsKey(segment)) region_cin.put(segment, contour.computeAverageIntensity(region_data, region_c.getValue(), contourMask_buffer));
                 
-                contour.computeRegionForces(region_data, region_c.getValue(), region_weight.getValue(), region_sensitivity.getValue(), region_cin.get(contour), region_cout);
+                contour.computeRegionForces(region_data, region_c.getValue(), region_weight.getValue(), region_sensitivity.getValue(), region_cin.get(segment), region_cout);
             }
             
             if (axis_weight.getValue() > EPSILON) contour.computeAxisForces(axis_weight.getValue());
             
             if (Math.abs(balloon_weight.getValue()) > EPSILON) contour.computeBalloonForces(balloon_weight.getValue());
+            
+            
+            if (volumes.containsKey(segment))
+            {
+                contour.computeVolumeConstraint(volumes.get(segment));
+            }
             
             contour.move(field, contour_timeStep.getValue());
         }
@@ -596,20 +617,23 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 {
                     public ActiveContour call()
                     {
+                        TrackSegment segment = trackGroup.getTrackSegmentWithDetection(contour);
+                        
                         if (regul_weight.getValue() > EPSILON) contour.computeInternalForces(regul_weight.getValue());
                         
                         if (Math.abs(edge_weight.getValue()) > EPSILON) contour.computeEdgeForces(edgeData, edge_c.getValue(), edge_weight.getValue());
                         
                         if (region_weight.getValue() > EPSILON)
                         {
-                            if (!region_cin.containsKey(contour)) region_cin.put(contour, contour.computeAverageIntensity(region_data, region_c.getValue(), contourMask_buffer));
+                            if (!region_cin.containsKey(segment)) region_cin.put(segment, contour.computeAverageIntensity(region_data, region_c.getValue(), contourMask_buffer));
                             
-                            contour.computeRegionForces(region_data, region_c.getValue(), region_weight.getValue(), region_sensitivity.getValue(), region_cin.get(contour), region_cout);
+                            contour.computeRegionForces(region_data, region_c.getValue(), region_weight.getValue(), region_sensitivity.getValue(), region_cin.get(segment), region_cout);
                         }
                         
                         if (axis_weight.getValue() > EPSILON) contour.computeAxisForces(axis_weight.getValue());
                         
                         if (Math.abs(balloon_weight.getValue()) > EPSILON) contour.computeBalloonForces(balloon_weight.getValue());
+                        
                         
                         if (coupling_flag.getValue())
                         {
@@ -620,6 +644,11 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                                 if (otherContour == null || otherContour == contour) continue;
                                 
                                 contour.computeFeedbackForces(otherContour);
+                            }
+
+                            if (volumes.containsKey(segment))
+                            {
+                                contour.computeVolumeConstraint(volumes.get(segment));
                             }
                         }
                         else
@@ -733,10 +762,15 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             {
                 public void run()
                 {
+                    TrackSegment segment = trackGroup.getTrackSegmentWithDetection(contour);
+                    
+                    // only update on the first contour of the segment (first time point)
+                    if (segment.getFirstDetection() != contour) return;
+                    
                     double cin = contour.computeAverageIntensity(region_data, region_c.getValue(), contourMask_buffer);
                     synchronized (region_cin)
                     {
-                        region_cin.put(contour, cin);
+                        region_cin.put(segment, cin);
                     }
                 }
             }));

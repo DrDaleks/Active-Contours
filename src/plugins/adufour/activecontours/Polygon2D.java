@@ -682,6 +682,37 @@ public class Polygon2D extends ActiveContour
         f.y += weight * (prev.y - 2 * curr.y + next.y);
     }
     
+    void computeVolumeConstraint(double targetVolume)
+    {
+        // 1) compute the difference between target and current volume
+        double volumeDiff = targetVolume - getDimension(2);
+        // if (volumeDiff > 0): contour too small, should no longer shrink
+        // if (volumeDiff < 0): contour too big, should no longer grow
+        
+        int n = points.size();
+        updateNormalsIfNeeded();
+        
+        for (int i = 0; i < n; i++)
+        {
+            Vector3d mf = modelForces[i];
+            
+            // 2) check whether the final force has same direction as the outer normal
+            double forceNorm = mf.dot(contourNormals[i]);
+            // if forces have same direction (forceNorm > 0): contour is growing
+            // if forces have opposite direction (forceNorm < 0): contour is shrinking
+            
+            if (forceNorm * volumeDiff < 0)
+            {
+                // forceNorm and volumeDiff have opposite signs because:
+                // - contour too small (volumeDiff > 0) and shrinking (forceNorm < 0)
+                // or
+                // - contour too large (volumeDiff < 0) and growing (forceNorm > 0)
+                // => in both cases, constrain the final force accordingly
+                mf.scale(1.0 / (1.0 + Math.abs(volumeDiff)));
+            }
+        }
+    }
+    
     /**
      * Computes the feedback forces yielded by the penetration of the current contour into the
      * target contour
