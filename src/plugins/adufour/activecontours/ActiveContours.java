@@ -60,63 +60,63 @@ import plugins.nchenouard.spot.Detection;
 
 public class ActiveContours extends EzPlug implements EzStoppable, Block
 {
-    private final double                   EPSILON               = 0.0000001;
+    private final double                  EPSILON               = 0.0000001;
     
-    private final EzVarBoolean             showAdvancedOptions   = new EzVarBoolean("Show advanced options", false);
+    private final EzVarBoolean            showAdvancedOptions   = new EzVarBoolean("Show advanced options", false);
     
-    public final EzVarSequence             input                 = new EzVarSequence("Input");
-    private Sequence                       inputData;
+    public final EzVarSequence            input                 = new EzVarSequence("Input");
+    private Sequence                      inputData;
     
-    public final EzVarDouble               init_isovalue         = new EzVarDouble("Isovalue", 1, 0, 1000000, 0.01);
+    public final EzVarDouble              init_isovalue         = new EzVarDouble("Isovalue", 1, 0, 1000000, 0.01);
     
-    public final EzVarDouble               regul_weight          = new EzVarDouble("Contour smoothness", 0.05, 0, 1.0, 0.01);
+    public final EzVarDouble              regul_weight          = new EzVarDouble("Contour smoothness", 0.05, 0, 1.0, 0.01);
     
-    public final EzGroup                   edge                  = new EzGroup("Find bright/dark edges");
-    public final EzVarDimensionPicker      edge_c                = new EzVarDimensionPicker("Find edges in channel", DimensionId.C, input);
-    public final EzVarDouble               edge_weight           = new EzVarDouble("Edge weight", 0, -1, 1, 0.1);
+    public final EzGroup                  edge                  = new EzGroup("Find bright/dark edges");
+    public final EzVarDimensionPicker     edge_c                = new EzVarDimensionPicker("Find edges in channel", DimensionId.C, input);
+    public final EzVarDouble              edge_weight           = new EzVarDouble("Edge weight", 0, -1, 1, 0.1);
     
-    public final EzGroup                   region                = new EzGroup("Find homogeneous intensity areas");
-    public final EzVarDimensionPicker      region_c              = new EzVarDimensionPicker("Find regions in channel", DimensionId.C, input);
-    public final EzVarDouble               region_weight         = new EzVarDouble("Region weight", 1.0, 0.0, 1.0, 0.1);
-    public final EzVarDouble               region_sensitivity    = new EzVarDouble("Region sensitivity", 1.0, 0.2, 5.0, 0.1);
+    public final EzGroup                  region                = new EzGroup("Find homogeneous intensity areas");
+    public final EzVarDimensionPicker     region_c              = new EzVarDimensionPicker("Find regions in channel", DimensionId.C, input);
+    public final EzVarDouble              region_weight         = new EzVarDouble("Region weight", 1.0, 0.0, 1.0, 0.1);
+    public final EzVarDouble              region_sensitivity    = new EzVarDouble("Region sensitivity", 1.0, 0.2, 5.0, 0.1);
     
-    public final EzVarDouble               balloon_weight        = new EzVarDouble("Contour inflation", 0, -0.5, 0.5, 0.001);
+    public final EzVarDouble              balloon_weight        = new EzVarDouble("Contour inflation", 0, -0.5, 0.5, 0.001);
     
-    public final EzVarDouble               axis_weight           = new EzVarDouble("Axis constraint", 0, 0.0, 1, 0.1);
+    public final EzVarDouble              axis_weight           = new EzVarDouble("Axis constraint", 0, 0.0, 1, 0.1);
     
-    public final EzVarBoolean              coupling_flag         = new EzVarBoolean("Multi-contour coupling", true);
+    public final EzVarBoolean             coupling_flag         = new EzVarBoolean("Multi-contour coupling", true);
     
-    public final EzGroup                   evolution             = new EzGroup("Evolution parameters");
-    public final EzVarSequence             evolution_bounds      = new EzVarSequence("Bound field to ROI of");
-    public final EzVarDouble               contour_resolution    = new EzVarDouble("Contour resolution", 2, 0.1, 1000.0, 0.1);
-    public final EzVarInteger              contour_minArea       = new EzVarInteger("Contour min. area", 10, 1, 100000000, 1);
-    public final EzVarDouble               contour_timeStep      = new EzVarDouble("Evolution time step", 0.1, 0.1, 10, 0.01);
-    public final EzVarInteger              convergence_winSize   = new EzVarInteger("Convergence window size", 50, 10, 10000, 10);
-    public final EzVarEnum<Operation>      convergence_operation = new EzVarEnum<SlidingWindow.Operation>("Convergence operation", Operation.values(), Operation.VAR_COEFF);
-    public final EzVarDouble               convergence_criterion = new EzVarDouble("Convergence criterion", 0.001, 0, 0.1, 0.001);
+    public final EzGroup                  evolution             = new EzGroup("Evolution parameters");
+    public final EzVarSequence            evolution_bounds      = new EzVarSequence("Bound field to ROI of");
+    public final EzVarDouble              contour_resolution    = new EzVarDouble("Contour resolution", 2, 0.1, 1000.0, 0.1);
+    public final EzVarInteger             contour_minArea       = new EzVarInteger("Contour min. area", 10, 1, 100000000, 1);
+    public final EzVarDouble              contour_timeStep      = new EzVarDouble("Evolution time step", 0.1, 0.1, 10, 0.01);
+    public final EzVarInteger             convergence_winSize   = new EzVarInteger("Convergence window size", 50, 10, 10000, 10);
+    public final EzVarEnum<Operation>     convergence_operation = new EzVarEnum<SlidingWindow.Operation>("Convergence operation", Operation.values(), Operation.VAR_COEFF);
+    public final EzVarDouble              convergence_criterion = new EzVarDouble("Convergence criterion", 0.001, 0, 0.1, 0.001);
     
-    public final EzVarBoolean              output_rois           = new EzVarBoolean("Regions of interest (ROI)", true);
+    public final EzVarBoolean             output_rois           = new EzVarBoolean("Regions of interest (ROI)", true);
     
-    public final EzVarBoolean              tracking              = new EzVarBoolean("Track objects over time", false);
-    public final EzVarBoolean              showTrackManager      = new EzVarBoolean("Send to track manager", false);
+    public final EzVarBoolean             tracking              = new EzVarBoolean("Track objects over time", false);
+    public final EzVarBoolean             showTrackManager      = new EzVarBoolean("Send to track manager", false);
     
-    private Sequence                       edgeData              = new Sequence("Edge information");
-    private Sequence                       contourMask_buffer    = new Sequence("Mask data");
+    private Sequence                      edgeData              = new Sequence("Edge information");
+    private Sequence                      contourMask_buffer    = new Sequence("Mask data");
     
-    private Sequence                       region_data;
+    private Sequence                      region_data;
     private HashMap<TrackSegment, Double> region_cin            = new HashMap<TrackSegment, Double>(0);
-    private double                         region_cout;
+    private double                        region_cout;
     
-    private VarROIArray                    roiInput              = new VarROIArray("input ROI");
-    private VarROIArray                    roiOutput             = new VarROIArray("Regions of interest");
+    private VarROIArray                   roiInput              = new VarROIArray("input ROI");
+    private VarROIArray                   roiOutput             = new VarROIArray("Regions of interest");
     
-    private boolean                        globalStop;
+    private boolean                       globalStop;
     
-    private TrackGroup                     trackGroup;
+    private TrackGroup                    trackGroup;
     
-    private ActiveContoursOverlay          overlay;
+    private ActiveContoursOverlay         overlay;
     
-    private ExecutorService                multiThreadService    = Executors.newFixedThreadPool(SystemUtil.getAvailableProcessors() * 2);
+    private ExecutorService               multiThreadService    = Executors.newFixedThreadPool(SystemUtil.getAvailableProcessors() * 2);
     
     public TrackGroup getTrackGroup()
     {
@@ -144,7 +144,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         region.setToolTipText("Sets the contour(s) to isolate homogeneous intensity regions");
         region_weight.setToolTipText("Set to 0 to deactivate this parameter");
         region_sensitivity.setToolTipText("Increase this value to be more sensitive to dim objects (default: 1)");
-        // showAdvancedOptions.addVisibilityTriggerTo(region_sensitivity, true);
+        showAdvancedOptions.addVisibilityTriggerTo(region_sensitivity, true);
         region.addEzComponent(region_c, region_weight, region_sensitivity);
         addEzComponent(region);
         
@@ -478,7 +478,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 if (volumes.containsKey(segment))
                 {
                     // un-comment to store volumes after each frame
-                     volumes.put(segment, ((ActiveContour) previous).getDimension(2));
+                    volumes.put(segment, ((ActiveContour) previous).getDimension(2));
                 }
                 else
                 {
@@ -599,11 +599,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             
             if (Math.abs(balloon_weight.getValue()) > EPSILON) contour.computeBalloonForces(balloon_weight.getValue());
             
-            
-            if (volumes.containsKey(segment))
-            {
-                contour.computeVolumeConstraint(volumes.get(segment));
-            }
+            if (volumes.containsKey(segment)) contour.computeVolumeConstraint(volumes.get(segment));
             
             contour.move(field, contour_timeStep.getValue());
         }
@@ -634,7 +630,6 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                         
                         if (Math.abs(balloon_weight.getValue()) > EPSILON) contour.computeBalloonForces(balloon_weight.getValue());
                         
-                        
                         if (coupling_flag.getValue())
                         {
                             // Don't move the contours just now: coupling feedback must be computed
@@ -645,11 +640,8 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                                 
                                 contour.computeFeedbackForces(otherContour);
                             }
-
-                            if (volumes.containsKey(segment))
-                            {
-                                contour.computeVolumeConstraint(volumes.get(segment));
-                            }
+                            
+                            if (volumes.containsKey(segment)) contour.computeVolumeConstraint(volumes.get(segment));
                         }
                         else
                         {
