@@ -3,7 +3,6 @@ package plugins.adufour.activecontours;
 import icy.canvas.IcyCanvas;
 import icy.painter.Overlay;
 import icy.sequence.Sequence;
-import icy.util.GraphicsUtil;
 
 import java.awt.Graphics2D;
 import java.util.ArrayList;
@@ -57,7 +56,10 @@ public class ActiveContoursOverlay extends Overlay
                     if (det.getT() == canvas.getPositionT())
                     {
                         ((ActiveContour) det).paint(g, sequence, canvas);
-                        GraphicsUtil.drawCenteredString(g, "" + id, (int) Math.round(det.getX()), (int) Math.round(det.getY()), false);
+                        
+                        // draw the contour number in its center (and mind the zoom factor)
+                        float f = (float) canvas.canvasToImageLogDeltaX(18);
+                        g.drawString("" + id, (float) det.getX() - (id < 10 ? f/2 : f), (float) det.getY() + f / 2);
                     }
                 }
                 
