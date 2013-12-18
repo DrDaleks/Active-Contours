@@ -7,7 +7,6 @@ import icy.roi.ROI;
 import icy.roi.ROI2D;
 import icy.sequence.Sequence;
 import icy.type.DataType;
-import icy.util.StringUtil;
 
 import java.awt.BasicStroke;
 import java.awt.Color;
@@ -435,13 +434,8 @@ public class Polygon2D extends ActiveContour
         int sizeX = data.getWidth();
         int sizeY = data.getHeight();
         
-        // if (bufferGraphics == null) bufferGraphics = buffer.createGraphics();
-        
-        // fill the contour contents in the buffer
-        // bufferGraphics.fill(path);
-        
         // compute the interior mean intensity
-        double inSum = 0, inCpt = 0, outSum = 0, outCpt = 0;
+        double inSum = 0, inCpt = 0;
         Rectangle bounds = path.getBounds();
         
         int minX = Math.max(bounds.x - bounds.width, 0);
@@ -462,17 +456,10 @@ public class Polygon2D extends ActiveContour
                     inSum += value;
                     inCpt++;
                 }
-                else
-                {
-                    double value = _data[offset];
-                    outSum += value;
-                    outCpt++;
-                }
             }
         }
         
         cin = inSum / inCpt;
-        // cout = outSum / outCpt;
         return cin;
     }
     
@@ -957,6 +944,8 @@ public class Polygon2D extends ActiveContour
         double x = 0;
         double y = 0;
         
+        double sumDisp = 0;
+        
         for (int index = 0; index < n; index++)
         {
             Point3d p = points.get(index);
@@ -972,6 +961,8 @@ public class Polygon2D extends ActiveContour
             double disp = force.length();
             
             if (disp > maxDisp) force.scale(maxDisp / disp);
+            
+            sumDisp += force.dot(contourNormals[index]);
             
             p.add(force);
             
@@ -994,14 +985,8 @@ public class Polygon2D extends ActiveContour
         
         if (convergence == null) return;
         
-        if (cout != 0.0)
-        {
-            convergence.add(cin);
-        }
-        else
-        {
-            convergence.add(getDimension(2));
-        }
+        convergence.add(getDimension(2));
+        
     }
     
     AnnounceFrame f = null; // new AnnounceFrame("ready");
@@ -1025,7 +1010,7 @@ public class Polygon2D extends ActiveContour
             g.draw(path);
         }
         // this line displays the average intensity inside the object
-        // g.drawString(StringUtil.toString(cin, 2), (float)getX(), (float)getY());
+        // g.drawString(StringUtil.toString(cin, 2), (float) getX() + 3, (float) getY());
     }
     
     /**
