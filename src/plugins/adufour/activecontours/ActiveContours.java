@@ -333,7 +333,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             }
             
             edgeData = currentFrame_float;
-            Sequence gaussian = Kernels1D.CUSTOM_GAUSSIAN.createGaussianKernel1D(2).toSequence();
+            Sequence gaussian = Kernels1D.CUSTOM_GAUSSIAN.createGaussianKernel1D(1).toSequence();
             
             // smooth the signal first
             try
@@ -531,7 +531,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             {
                 Double criterion = contour.convergence.computeCriterion(convergence_operation.getValue());
                 
-                if (criterion != null && criterion < convergence_criterion.getValue() / 100)
+                if (criterion != null && criterion <= convergence_criterion.getValue() / 100)
                 {
                     nbConvergedContours++;
                     continue;
@@ -598,8 +598,6 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             if (axis_weight.getValue() > EPSILON) contour.computeAxisForces(axis_weight.getValue());
             
             if (Math.abs(balloon_weight.getValue()) > EPSILON) contour.computeBalloonForces(balloon_weight.getValue());
-            
-            if (volumes.containsKey(segment)) contour.computeVolumeConstraint(volumes.get(segment));
             
             contour.move(field, contour_timeStep.getValue());
         }
@@ -757,7 +755,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                     TrackSegment segment = trackGroup.getTrackSegmentWithDetection(contour);
                     
                     // only update on the first contour of the segment (first time point)
-                    if (segment.getFirstDetection() != contour) return;
+                    // if (segment.getFirstDetection() != contour) return;
                     
                     double cin = contour.computeAverageIntensity(region_data, region_c.getValue(), contourMask_buffer);
                     synchronized (region_cin)

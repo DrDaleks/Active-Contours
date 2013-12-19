@@ -422,8 +422,6 @@ public class Polygon2D extends ActiveContour
         }
     }
     
-    private double cin = 0, cout = 0;
-    
     @Override
     public double computeAverageIntensity(Sequence imageData_float, int channel, Sequence buffer_data)
     {
@@ -459,8 +457,7 @@ public class Polygon2D extends ActiveContour
             }
         }
         
-        cin = inSum / inCpt;
-        return cin;
+        return inSum / inCpt;
     }
     
     /**
@@ -576,10 +573,7 @@ public class Polygon2D extends ActiveContour
     @Override
     void computeRegionForces(Sequence imageData, int channel, double weight, double sensitivity, double cin, double cout)
     {
-        this.cout = cout;
-        this.cin = cin;
-        
-        sensitivity = sensitivity / Math.max(cout, cin);
+        sensitivity = sensitivity / Math.log10(cin/cout);//(2 * Math.max(cout, cin));
         
         updateNormalsIfNeeded();
         
@@ -603,12 +597,13 @@ public class Polygon2D extends ActiveContour
             if (p.x < 1 || p.y < 1 || p.x >= width - 1 || p.y >= height - 1) continue;
             
             val = getPixelValue(data, width, height, p.x, p.y);
+            
             inDiff = val - cin;
             // inDiff *= inDiff;
             outDiff = val - cout;
             // outDiff *= outDiff;
             
-            sum = weight * contour_resolution.getValue() * (sensitivity * (outDiff * outDiff) - (inDiff * inDiff));
+            sum = weight * contour_resolution.getValue() * (sensitivity * (outDiff * outDiff) - (inDiff * inDiff) / sensitivity);
             
             if (counterClockWise)
             {
@@ -644,8 +639,8 @@ public class Polygon2D extends ActiveContour
         next = points.get(1);
         
         f = feedbackForces[0];
-        f.x += weight * (prev.x + next.x - 2 * curr.x);
-        f.y += weight * (prev.y + next.y - 2 * curr.y);
+        f.x += weight * (prev.x - 2 * curr.x + next.x);
+        f.y += weight * (prev.y - 2 * curr.y + next.y);
         
         // middle points
         for (int i = 1; i < n - 1; i++)
@@ -655,8 +650,8 @@ public class Polygon2D extends ActiveContour
             curr = points.get(i);
             next = points.get(i + 1);
             
-            f.x += weight * (prev.x + next.x - 2 * curr.x);
-            f.y += weight * (prev.y + next.y - 2 * curr.y);
+            f.x += weight * (prev.x - 2 * curr.x + next.x);
+            f.y += weight * (prev.y - 2 * curr.y + next.y);
         }
         
         // last point
@@ -735,8 +730,9 @@ public class Polygon2D extends ActiveContour
                 
                 if ((penetration = target.contains(p)) > 0)
                 {
+//                    feedbackForce.scale(-penetration, contourNormals[index]);
                     feedbackForce.scaleAdd(-penetration, contourNormals[index], feedbackForce);
-                    modelForces[index].set(0, 0, 0);
+                    modelForces[index].scale(0.05);
                 }
             }
             index++;
@@ -761,7 +757,7 @@ public class Polygon2D extends ActiveContour
         final int i = (int) Math.round(x);
         final int j = (int) Math.round(y);
         
-        if (i < 0 || i >= width - 1 || j < 0 || j >= height - 1) return 0;
+        if (i < 0 || i >= width - 1 || j < 0 || j >= height - 1) return 0f;
         
         float value = 0;
         
@@ -944,8 +940,6 @@ public class Polygon2D extends ActiveContour
         double x = 0;
         double y = 0;
         
-        double sumDisp = 0;
-        
         for (int index = 0; index < n; index++)
         {
             Point3d p = points.get(index);
@@ -961,8 +955,6 @@ public class Polygon2D extends ActiveContour
             double disp = force.length();
             
             if (disp > maxDisp) force.scale(maxDisp / disp);
-            
-            sumDisp += force.dot(contourNormals[index]);
             
             p.add(force);
             

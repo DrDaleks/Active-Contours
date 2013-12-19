@@ -57,6 +57,7 @@ public class SlidingWindow
     {
         // skip every other value to prevent oscillation effects
         if (count % 1 == 0) window[(count / 2) % window.length] = value;
+//        window[count % window.length] = value;
         count++;
     }
     
@@ -88,7 +89,7 @@ public class SlidingWindow
             case VARIANCE:
                 return ArrayMath.var(window, true);
             case VAR_COEFF:
-                return ArrayMath.std(window, true) / ArrayMath.mean(window);
+                return ArrayMath.std(window, false) / ArrayMath.mean(window);
             default:
                 throw new UnsupportedOperationException("operation " + operation.toString() + " not supported yet");
         }
