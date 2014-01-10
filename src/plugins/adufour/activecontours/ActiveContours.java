@@ -57,6 +57,7 @@ import plugins.fab.trackmanager.TrackSegment;
 import plugins.kernel.roi.roi2d.ROI2DArea;
 import plugins.kernel.roi.roi2d.ROI2DRectangle;
 import plugins.nchenouard.spot.Detection;
+import ucar.unidata.util.StringUtil;
 
 public class ActiveContours extends EzPlug implements EzStoppable, Block
 {
@@ -193,7 +194,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         });
         
         // output
-        output_rois.setToolTipText("Clone the original sequence and with results overlayed as ROIs");
+        output_rois.setToolTipText("Clone the original sequence with results overlayed as ROIs");
         addEzComponent(output_rois);
         
         tracking.setToolTipText("Track objects over time and export results to the track manager");
@@ -234,9 +235,6 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         // replace any ActiveContours Painter object on the sequence by ours
         for (Overlay overlay : inputData.getOverlays())
             if (overlay instanceof ActiveContoursOverlay) inputData.removeOverlay(overlay);
-        
-        for (ROI roi : inputData.getROIs())
-            if (roi.getName().startsWith("[T=")) inputData.removeROI(roi);
         
         overlay = new ActiveContoursOverlay(trackGroup);
         overlay.setPriority(OverlayPriority.TOPMOST);
@@ -291,8 +289,15 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             
             if (output_rois.getValue())
             {
+                // duplicate the input sequence
+                
+                Sequence inCopy = SequenceUtil.getCopy(inputData);
+                inCopy.setName(inputData.getName() + " + Active contours");
+                
                 for (ROI roi : roiOutput.getValue())
-                    inputData.addROI(roi, false);
+                    inCopy.addROI(roi, false);
+                
+                addSequence(inCopy);
             }
             
             if (tracking.getValue() && showTrackManager.getValue())
@@ -808,6 +813,8 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         // Append the current list to the existing one
         if (output_rois.getValue()) rois = new ArrayList<ROI>(Arrays.asList(roiOutput.getValue()));
         
+        int nbPaddingDigits = (int) Math.floor(Math.log10(segments.size()));
+        
         for (int i = 1; i <= segments.size(); i++)
         {
             TrackSegment segment = segments.get(i - 1);
@@ -819,19 +826,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             if (output_rois.getValue())
             {
                 ROI roi = contour.toROI();
-                roi.setName("Object #" + i);
-                
-                // // merge with existing ROI
-                // if (rois.containsKey(segment))
-                // {
-                // roi = ROIUtil.merge(Arrays.asList(rois.get(segment), roi), BooleanOperator.OR);
-                // }
-                // else
-                // {
-                // roi.setName("Contour #" + i);
-                // }
-                // rois.put(segment, roi);
-                
+                roi.setName("Object #" + StringUtil.padZero(i, nbPaddingDigits + 1));
                 roi.setColor(contour.getColor());
                 rois.add(roi);
             }
