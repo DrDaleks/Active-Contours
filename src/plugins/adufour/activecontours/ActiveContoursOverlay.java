@@ -10,7 +10,6 @@ import java.util.HashMap;
 
 import plugins.fab.trackmanager.TrackGroup;
 import plugins.fab.trackmanager.TrackSegment;
-import plugins.nchenouard.spot.Detection;
 
 public class ActiveContoursOverlay extends Overlay
 {
@@ -46,24 +45,17 @@ public class ActiveContoursOverlay extends Overlay
         {
             ArrayList<TrackSegment> segments = new ArrayList<TrackSegment>(trackGroup.getTrackSegmentList());
             
-            int id = 1;
-            for (TrackSegment segment : segments)
+            for (int i = 1; i <= segments.size(); i++)
             {
-                ArrayList<Detection> detections = new ArrayList<Detection>(segment.getDetectionList());
+                TrackSegment segment = segments.get(i - 1);
                 
-                for (Detection det : detections)
-                {
-                    if (det.getT() == canvas.getPositionT())
-                    {
-                        ((ActiveContour) det).paint(g, sequence, canvas);
-                        
-                        // draw the contour number in its center (and mind the zoom factor)
-                        float f = (float) canvas.canvasToImageLogDeltaX(18);
-                        g.drawString("" + id, (float) det.getX() - (id < 10 ? f/2 : f), (float) det.getY() + f / 2);
-                    }
-                }
+                ActiveContour contour = (ActiveContour) segment.getDetectionAtTime(t);
+                if (contour == null) continue;
+                contour.paint(g, sequence, canvas);
                 
-                id++;
+                // draw the contour number in its center (and mind the zoom factor)
+                float f = (float) canvas.canvasToImageLogDeltaX(18);
+                g.drawString("" + i, (float) contour.getX() - (i < 10 ? f / 2 : f), (float) contour.getY() + f / 2);
             }
         }
     }
