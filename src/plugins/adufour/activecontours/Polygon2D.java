@@ -3,6 +3,7 @@ package plugins.adufour.activecontours;
 import icy.canvas.IcyCanvas;
 import icy.gui.frame.progress.AnnounceFrame;
 import icy.image.IcyBufferedImage;
+import icy.roi.BooleanMask2D;
 import icy.roi.ROI;
 import icy.roi.ROI2D;
 import icy.sequence.Sequence;
@@ -23,9 +24,11 @@ import javax.media.j3d.BoundingSphere;
 import javax.vecmath.Point3d;
 import javax.vecmath.Vector3d;
 
+import plugins.adufour.blocks.tools.roi.DilateROI;
 import plugins.adufour.ezplug.EzException;
 import plugins.adufour.ezplug.EzVarDouble;
 import plugins.adufour.ezplug.EzVarInteger;
+import plugins.adufour.morphology.FillHolesInROI;
 import plugins.kernel.roi.roi2d.ROI2DArea;
 import plugins.kernel.roi.roi2d.ROI2DEllipse;
 import plugins.kernel.roi.roi2d.ROI2DPolygon;
@@ -77,17 +80,21 @@ public class Polygon2D extends ActiveContour
         }
     }
     
-    final ArrayList<Point3d> points = new ArrayList<Point3d>();
+    private final FillHolesInROI holeFiller = new FillHolesInROI();
     
-    Path2D.Double            path   = new Path2D.Double();
+    private final DilateROI dilator = new DilateROI();
     
-    private Vector3d[]       modelForces;
+    final ArrayList<Point3d>     points     = new ArrayList<Point3d>();
     
-    private Vector3d[]       contourNormals;
+    Path2D.Double                path       = new Path2D.Double();
     
-    private Vector3d[]       feedbackForces;
+    private Vector3d[]           modelForces;
     
-    private boolean          counterClockWise;
+    private Vector3d[]           contourNormals;
+    
+    private Vector3d[]           feedbackForces;
+    
+    private boolean              counterClockWise;
     
     protected Polygon2D(ActiveContours owner, EzVarDouble contour_resolution, EzVarInteger contour_minArea, SlidingWindow convergenceWindow)
     {
@@ -138,13 +145,20 @@ public class Polygon2D extends ActiveContour
         
         if (roi instanceof ROI2DArea)
         {
+            // dilate ROI
+            roi = (ROI2D) dilator.dilateROI(roi, 1, 1, 0);
+            
+            // fill holes first
+            BooleanMask2D mask = roi.getBooleanMask(true);
+            if (holeFiller.fillHoles(mask)) ((ROI2DArea) roi).setAsBooleanMask(mask);
+            
             try
             {
                 triangulate((ROI2DArea) roi, contour_resolution.getValue());
             }
             catch (TopologyException e)
             {
-                roi = new ROI2DRectangle(roi.getBounds2D());
+                roi = new ROI2DEllipse(roi.getBounds2D());
             }
             
             if (points.size() == 0)
@@ -573,7 +587,7 @@ public class Polygon2D extends ActiveContour
     @Override
     void computeRegionForces(Sequence imageData, int channel, double weight, double sensitivity, double cin, double cout)
     {
-        sensitivity = sensitivity / Math.log10(cin/cout);//(2 * Math.max(cout, cin));
+        sensitivity = sensitivity / Math.log10(cin / cout);// (2 * Math.max(cout, cin));
         
         updateNormalsIfNeeded();
         
@@ -730,7 +744,7 @@ public class Polygon2D extends ActiveContour
                 
                 if ((penetration = target.contains(p)) > 0)
                 {
-//                    feedbackForce.scale(-penetration, contourNormals[index]);
+                    // feedbackForce.scale(-penetration, contourNormals[index]);
                     feedbackForce.scaleAdd(-penetration, contourNormals[index], feedbackForce);
                     modelForces[index].scale(0.05);
                 }
