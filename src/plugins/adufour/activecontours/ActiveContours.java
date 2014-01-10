@@ -10,13 +10,11 @@ import icy.roi.ROI2D;
 import icy.roi.ROIUtil;
 import icy.sequence.DimensionId;
 import icy.sequence.Sequence;
-import icy.sequence.SequenceDataIterator;
 import icy.sequence.SequenceUtil;
 import icy.swimmingPool.SwimmingObject;
 import icy.system.IcyHandledException;
 import icy.system.SystemUtil;
 import icy.system.thread.ThreadUtil;
-import icy.type.DataIteratorUtil;
 import icy.type.DataType;
 import icy.util.ShapeUtil.BooleanOperator;
 
@@ -98,8 +96,6 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     public final EzVarDouble              convergence_criterion = new EzVarDouble("Convergence criterion", 0.001, 0, 0.1, 0.001);
     
     public final EzVarBoolean             output_rois           = new EzVarBoolean("Regions of interest (ROI)", true);
-    public final EzVarBoolean             output_labels         = new EzVarBoolean("Labeled sequence", true);
-    private Sequence                      labeledSequence;
     
     public final EzVarBoolean             tracking              = new EzVarBoolean("Track objects over time", false);
     public final EzVarBoolean             showTrackManager      = new EzVarBoolean("Send to track manager", false);
@@ -197,11 +193,8 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         });
         
         // output
-        output_rois.setToolTipText("Create a ROI for each detected contour on the original sequence");
+        output_rois.setToolTipText("Clone the original sequence and with results overlayed as ROIs");
         addEzComponent(output_rois);
-        
-        output_labels.setToolTipText("Create new a labeled sequence with the detected contours");
-        addEzComponent(output_labels);
         
         tracking.setToolTipText("Track objects over time and export results to the track manager");
         addEzComponent(tracking);
@@ -301,8 +294,6 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 for (ROI roi : roiOutput.getValue())
                     inputData.addROI(roi, false);
             }
-            
-            if (output_labels.getValue()) addSequence(labeledSequence);
             
             if (tracking.getValue() && showTrackManager.getValue())
             {
@@ -500,8 +491,6 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     
     private void evolveContours(final int t)
     {
-        labeledSequence = (output_labels.getValue() ? new Sequence("Contours") : null);
-        
         // retrieve the contours on the current frame and store them in currentContours
         final HashSet<ActiveContour> allContours = new HashSet<ActiveContour>(trackGroup.getTrackSegmentList().size());
         
@@ -819,11 +808,6 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         // Append the current list to the existing one
         if (output_rois.getValue()) rois = new ArrayList<ROI>(Arrays.asList(roiOutput.getValue()));
         
-        if (labeledSequence != null)
-        {
-            labeledSequence.setImage(t, 0, new IcyBufferedImage(inputData.getWidth(), inputData.getHeight(), 1, DataType.USHORT));
-        }
-        
         for (int i = 1; i <= segments.size(); i++)
         {
             TrackSegment segment = segments.get(i - 1);
@@ -835,14 +819,21 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             if (output_rois.getValue())
             {
                 ROI roi = contour.toROI();
-                roi.setName("Contour #" + i);
+                roi.setName("Object #" + i);
+                
+                // // merge with existing ROI
+                // if (rois.containsKey(segment))
+                // {
+                // roi = ROIUtil.merge(Arrays.asList(rois.get(segment), roi), BooleanOperator.OR);
+                // }
+                // else
+                // {
+                // roi.setName("Contour #" + i);
+                // }
+                // rois.put(segment, roi);
+                
                 roi.setColor(contour.getColor());
                 rois.add(roi);
-            }
-            
-            if (labeledSequence != null)
-            {
-                DataIteratorUtil.set(new SequenceDataIterator(labeledSequence, contour.toROI()), (short) i);
             }
         }
         
@@ -850,11 +841,6 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         {
             // roiOutput.setValue(rois.values().toArray(new ROI[0]));
             roiOutput.setValue(rois.toArray(new ROI[0]));
-        }
-        
-        if (labeledSequence != null)
-        {
-            labeledSequence.updateChannelsBounds();
         }
     }
     
