@@ -2,6 +2,7 @@ package plugins.adufour.activecontours;
 
 import icy.image.IcyBufferedImage;
 import icy.main.Icy;
+import icy.math.ArrayMath;
 import icy.painter.Overlay;
 import icy.painter.Overlay.OverlayPriority;
 import icy.roi.BooleanMask2D;
@@ -325,29 +326,68 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     {
         Sequence currentFrame_float = SequenceUtil.convertToType(SequenceUtil.extractFrame(inputData, t), DataType.FLOAT, true, true);
         
+        if (edge_c.getValue() >= currentFrame_float.getSizeC())
+        {
+            throw new IcyHandledException("The selected edge channel is invalid.");
+        }
+        
+        if (region_c.getValue() >= currentFrame_float.getSizeC())
+        {
+            throw new IcyHandledException("The selected region channel is valid.");
+        }
+        
+        // smooth the signal first
+        Sequence gaussian = Kernels1D.CUSTOM_GAUSSIAN.createGaussianKernel1D(1.5).toSequence();
+        try
+        {
+            Convolution1D.convolve(currentFrame_float, gaussian, gaussian, null);
+        }
+        catch (ConvolutionException e)
+        {
+            throw new EzException("Cannot smooth the signal: " + e.getMessage(), true);
+        }
+        
         // 1) Initialize the edge data
         {
-            if (edge_c.getValue() >= currentFrame_float.getSizeC())
+            if (edge_c.getValue() == region_c.getValue())
             {
-                throw new IcyHandledException("The selected edge channel is invalid.");
+                // find edges within the region-based information
+                // compute the gradient magnitude
+                
+                // put the X gradient in edgeData, and add the Y gradient into it
+                edgeData = SequenceUtil.getCopy(currentFrame_float);
+                Sequence gY = SequenceUtil.getCopy(currentFrame_float);
+                
+                Sequence gradient = Kernels1D.GRADIENT.toSequence();
+                try
+                {
+                    // X
+                    Convolution1D.convolve(edgeData, gradient, null, null);
+                    // Y
+                    Convolution1D.convolve(gY, null, gradient, null);
+                    
+                    for (int z = 0; z < inputData.getSizeZ(); z++)
+                    {
+                        ArrayMath.abs(edgeData.getDataXYAsFloat(0, z, 0), true);
+                        ArrayMath.abs(gY.getDataXYAsFloat(0, z, 0), true);
+                        // add y into x
+                        ArrayMath.add(edgeData.getDataXYAsFloat(0, z, 0), gY.getDataXYAsFloat(0, z, 0), edgeData.getDataXYAsFloat(0, z, 0));
+                    }
+                    
+                    // rescale to [0-1]
+                    edgeData.updateChannelsBounds(true);
+                    edgeData = SequenceUtil.convertToType(edgeData, edgeData.getDataType_(), true, true);
+//                    addSequence(edgeData);
+                }
+                catch (ConvolutionException e)
+                {
+                    throw new EzException("Cannot smooth the signal: " + e.getMessage(), true);
+                }
             }
-            
-            if (region_c.getValue() >= currentFrame_float.getSizeC())
+            else
             {
-                throw new IcyHandledException("The selected region channel is valid.");
-            }
-            
-            edgeData = currentFrame_float;
-            Sequence gaussian = Kernels1D.CUSTOM_GAUSSIAN.createGaussianKernel1D(1).toSequence();
-            
-            // smooth the signal first
-            try
-            {
-                Convolution1D.convolve(edgeData, gaussian, gaussian, null);
-            }
-            catch (ConvolutionException e)
-            {
-                throw new EzException("Cannot smooth the signal: " + e.getMessage(), true);
+                // the edge information is in a specific channel already
+                edgeData = currentFrame_float;
             }
         }
         
@@ -374,6 +414,13 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 ArrayList<ROI2D> roiFromSequence = inputData.getROI2Ds();
                 
                 if (roiFromSequence.isEmpty()) throw new EzException("Please draw or select a ROI", true);
+                
+                // only pick ROI in all or the current frame
+                for (int i = 0; i < roiFromSequence.size(); i++)
+                {
+                    ROI2D roi = roiFromSequence.get(i);
+                    if (roi.getT() != -1 && roi.getT() != t) roiFromSequence.remove(i--);
+                }
                 
                 roiInput.setValue(roiFromSequence.toArray(new ROI2D[roiFromSequence.size()]));
             }
@@ -644,7 +691,8 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                                 contour.computeFeedbackForces(otherContour);
                             }
                             
-                            if (volumes.containsKey(segment)) contour.computeVolumeConstraint(volumes.get(segment));
+                            // if (volumes.containsKey(segment))
+                            // contour.computeVolumeConstraint(volumes.get(segment));
                         }
                         else
                         {
