@@ -82,7 +82,7 @@ public class Polygon2D extends ActiveContour
     
     private final FillHolesInROI holeFiller = new FillHolesInROI();
     
-    private final DilateROI dilator = new DilateROI();
+    private final DilateROI      dilator    = new DilateROI();
     
     final ArrayList<Point3d>     points     = new ArrayList<Point3d>();
     
@@ -587,7 +587,9 @@ public class Polygon2D extends ActiveContour
     @Override
     void computeRegionForces(Sequence imageData, int channel, double weight, double sensitivity, double cin, double cout)
     {
-        sensitivity = sensitivity / Math.log10(cin / cout);// (2 * Math.max(cout, cin));
+        // sensitivity should be high for dim objects, low for bright objects
+        sensitivity = sensitivity / (3 * Math.max(cout, cin));
+//         sensitivity = sensitivity / (Math.log10(cin / cout));
         
         updateNormalsIfNeeded();
         
@@ -617,7 +619,7 @@ public class Polygon2D extends ActiveContour
             outDiff = val - cout;
             // outDiff *= outDiff;
             
-            sum = weight * contour_resolution.getValue() * (sensitivity * (outDiff * outDiff) - (inDiff * inDiff) / sensitivity);
+            sum = weight * contour_resolution.getValue() * ( sensitivity * (outDiff * outDiff) - (inDiff * inDiff) / sensitivity);
             
             if (counterClockWise)
             {
