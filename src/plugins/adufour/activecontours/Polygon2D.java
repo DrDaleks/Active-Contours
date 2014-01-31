@@ -573,13 +573,16 @@ public class Polygon2D extends ActiveContour
         {
             Point3d p = points.get(i);
             Vector3d f = modelForces[i];
+            
             // compute the gradient (2nd order)
-            double nextX = getPixelValue(data, width, height, p.x + 1, p.y);
-            double prevX = getPixelValue(data, width, height, p.x - 1, p.y);
-            double nextY = getPixelValue(data, width, height, p.x, p.y + 1);
-            double prevY = getPixelValue(data, width, height, p.x, p.y - 1);
+            double nextX = getPixelValue(data, width, height, p.x + 0.5, p.y);
+            double prevX = getPixelValue(data, width, height, p.x - 0.5, p.y);
+            double nextY = getPixelValue(data, width, height, p.x, p.y + 0.5);
+            double prevY = getPixelValue(data, width, height, p.x, p.y - 0.5);
             grad.set(nextX - prevX, nextY - prevY, 0.0);
+
             grad.scale(weight);
+            
             f.add(grad);
         }
     }
@@ -588,25 +591,26 @@ public class Polygon2D extends ActiveContour
     void computeRegionForces(Sequence imageData, int channel, double weight, double sensitivity, double cin, double cout)
     {
         // sensitivity should be high for dim objects, low for bright objects
-        sensitivity = sensitivity / (3 * Math.max(cout, cin));
+//sensitivity *= 1/(1+cin);
+        //        sensitivity = sensitivity * cin / (0.01 + cout);
+//        sensitivity = sensitivity / (2 * Math.max(cout, cin));
 //         sensitivity = sensitivity / (Math.log10(cin / cout));
         
         updateNormalsIfNeeded();
         
         Point3d p;
-        Vector3d f, norm;
+        Vector3d f, norm, cvms = new Vector3d();;
         double val, inDiff, outDiff, sum;
         int n = points.size();
         
         int width = imageData.getWidth();
         int height = imageData.getHeight();
         float[] data = imageData.getDataXYAsFloat(0, (int) Math.round(getZ()), channel);
-        
+      
         for (int i = 0; i < n; i++)
         {
             p = points.get(i);
             f = modelForces[i];
-            
             norm = contourNormals[i];
             
             // bounds check
@@ -621,16 +625,9 @@ public class Polygon2D extends ActiveContour
             
             sum = weight * contour_resolution.getValue() * ( sensitivity * (outDiff * outDiff) - (inDiff * inDiff) / sensitivity);
             
-            if (counterClockWise)
-            {
-                f.x -= sum * norm.x;
-                f.y -= sum * norm.y;
-            }
-            else
-            {
-                f.x += sum * norm.x;
-                f.y += sum * norm.y;
-            }
+            cvms.scale(counterClockWise ? -sum : sum, norm);
+            
+            f.add(cvms);
         }
         
     }
@@ -655,8 +652,11 @@ public class Polygon2D extends ActiveContour
         next = points.get(1);
         
         f = feedbackForces[0];
+        
         f.x += weight * (prev.x - 2 * curr.x + next.x);
         f.y += weight * (prev.y - 2 * curr.y + next.y);
+//        f.x -= 0.5*weight * (next.x - curr.x);
+//        f.y -= 0.5*weight * (next.y - curr.y);        
         
         // middle points
         for (int i = 1; i < n - 1; i++)
@@ -668,6 +668,8 @@ public class Polygon2D extends ActiveContour
             
             f.x += weight * (prev.x - 2 * curr.x + next.x);
             f.y += weight * (prev.y - 2 * curr.y + next.y);
+//            f.x -= 0.5*weight * (next.x - curr.x);
+//            f.y -= 0.5*weight * (next.y - curr.y);
         }
         
         // last point
@@ -678,6 +680,8 @@ public class Polygon2D extends ActiveContour
         
         f.x += weight * (prev.x - 2 * curr.x + next.x);
         f.y += weight * (prev.y - 2 * curr.y + next.y);
+//        f.x -= 0.5*weight * (next.x - curr.x);
+//        f.y -= 0.5*weight * (next.y - curr.y);
     }
     
     void computeVolumeConstraint(double targetVolume)
