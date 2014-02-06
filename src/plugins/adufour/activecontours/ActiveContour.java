@@ -150,7 +150,7 @@ public abstract class ActiveContour extends Detection implements Iterable<Point3
      * @param edgeData
      *            a sequence containing the edge information (one channel per edge direction)
      */
-    abstract void computeEdgeForces(double weight, Sequence edgeData);
+    abstract void computeEdgeForces(Sequence edgeData, int channel, double weight);
     
     /**
      * Update region term of the contour evolution according to the Chan-Vese-Mumford-Shah
@@ -165,11 +165,13 @@ public abstract class ActiveContour extends Detection implements Iterable<Point3
      * @param cout
      *            the intensity mean outside the contour
      * @param sensitivity
-     *            set 1 for default, lower than 1 for high SNRs and vice-versa
+     *            set 1 for default, greater than 1 for high SNRs and vice-versa
      */
-    abstract void computeRegionForces(Sequence imageData, double weight, double cin, double cout);
+    abstract void computeRegionForces(Sequence imageData, int channel, double weight, double sensitivity, double cin, double cout);
     
     abstract void computeInternalForces(double weight);
+    
+    abstract void computeVolumeConstraint(double targetVolume);
     
     /**
      * Computes the feedback forces yielded by the penetration of the current contour into the
@@ -181,7 +183,7 @@ public abstract class ActiveContour extends Detection implements Iterable<Point3
      */
     abstract int computeFeedbackForces(ActiveContour target);
     
-    public abstract double computeAverageIntensity(Sequence region_data, Sequence buffer);
+    public abstract double computeAverageIntensity(Sequence imageData, int channel, Sequence buffer);
     
     /**
      * Tests whether the given point is inside the contour, and if so returns the penetration depth
@@ -196,15 +198,6 @@ public abstract class ActiveContour extends Detection implements Iterable<Point3
      *         </ul>
      */
     public abstract double contains(Point3d p);
-    
-    /**
-     * Computes the algebraic area of the current contour. The returned value is negative if the
-     * contour points are order clockwise and positive if ordered counter-clockwise. The contour's
-     * surface is just the absolute value of this algebraic surface
-     * 
-     * @return
-     */
-    protected abstract double getAlgebraicArea();
     
     /**
      * 

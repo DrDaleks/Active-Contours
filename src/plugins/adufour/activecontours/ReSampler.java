@@ -30,7 +30,7 @@ public class ReSampler implements Callable<Boolean>
         boolean change = false;
         try
         {
-            contour.reSample(0.8, 1.4);
+            contour.reSample(0.7, 1.4);
         }
         catch (TopologyException e)
         {
