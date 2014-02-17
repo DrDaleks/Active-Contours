@@ -1073,7 +1073,7 @@ public class Polygon2D extends ActiveContour
             // all points but the last
             for (int i = 0; i < n - 1; i++)
             {
-                if (n < 4) return;
+                if (n < 4) throw new TopologyException(this, new Polygon2D[] {});
                 
                 Point3d pt1 = points.get(i);
                 Point3d pt2 = points.get(i + 1);
