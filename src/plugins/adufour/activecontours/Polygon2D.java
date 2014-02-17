@@ -580,7 +580,7 @@ public class Polygon2D extends ActiveContour
             double nextY = getPixelValue(data, width, height, p.x, p.y + 0.5);
             double prevY = getPixelValue(data, width, height, p.x, p.y - 0.5);
             grad.set(nextX - prevX, nextY - prevY, 0.0);
-
+            
             grad.scale(weight);
             
             f.add(grad);
@@ -590,11 +590,12 @@ public class Polygon2D extends ActiveContour
     @Override
     void computeRegionForces(Sequence imageData, int channel, double weight, double sensitivity, double cin, double cout)
     {
-        // sensitivity should be high for dim objects, low for bright objects
-//sensitivity *= 1/(1+cin);
-        //        sensitivity = sensitivity * cin / (0.01 + cout);
-//        sensitivity = sensitivity / (2 * Math.max(cout, cin));
-//         sensitivity = sensitivity / (Math.log10(cin / cout));
+        // sensitivity should be high for dim objects, low for bright objects...
+        // ... but none of the following options work properly
+        // sensitivity *= 1/(1+cin);
+        // sensitivity = sensitivity * cin / (0.01 + cout);
+        // sensitivity = sensitivity / (2 * Math.max(cout, cin));
+        // sensitivity = sensitivity / (Math.log10(cin / cout));
         
         updateNormalsIfNeeded();
         
@@ -606,7 +607,7 @@ public class Polygon2D extends ActiveContour
         int width = imageData.getWidth();
         int height = imageData.getHeight();
         float[] data = imageData.getDataXYAsFloat(0, (int) Math.round(getZ()), channel);
-      
+        
         for (int i = 0; i < n; i++)
         {
             p = points.get(i);
@@ -619,11 +620,12 @@ public class Polygon2D extends ActiveContour
             val = getPixelValue(data, width, height, p.x, p.y);
             
             inDiff = val - cin;
-            // inDiff *= inDiff;
-            outDiff = val - cout;
-            // outDiff *= outDiff;
+            inDiff *= inDiff;
             
-            sum = weight * contour_resolution.getValue() * ( sensitivity * (outDiff * outDiff) - (inDiff * inDiff) / sensitivity);
+            outDiff = val - cout;
+            outDiff *= outDiff;
+            
+            sum = weight * contour_resolution.getValue() * (sensitivity * outDiff) - (inDiff / sensitivity);
             
             cvms.scale(counterClockWise ? -sum : sum, norm);
             
@@ -655,8 +657,8 @@ public class Polygon2D extends ActiveContour
         
         f.x += weight * (prev.x - 2 * curr.x + next.x);
         f.y += weight * (prev.y - 2 * curr.y + next.y);
-//        f.x -= 0.5*weight * (next.x - curr.x);
-//        f.y -= 0.5*weight * (next.y - curr.y);        
+        // f.x -= 0.5*weight * (next.x - curr.x);
+        // f.y -= 0.5*weight * (next.y - curr.y);
         
         // middle points
         for (int i = 1; i < n - 1; i++)
@@ -668,8 +670,8 @@ public class Polygon2D extends ActiveContour
             
             f.x += weight * (prev.x - 2 * curr.x + next.x);
             f.y += weight * (prev.y - 2 * curr.y + next.y);
-//            f.x -= 0.5*weight * (next.x - curr.x);
-//            f.y -= 0.5*weight * (next.y - curr.y);
+            // f.x -= 0.5*weight * (next.x - curr.x);
+            // f.y -= 0.5*weight * (next.y - curr.y);
         }
         
         // last point
@@ -680,8 +682,8 @@ public class Polygon2D extends ActiveContour
         
         f.x += weight * (prev.x - 2 * curr.x + next.x);
         f.y += weight * (prev.y - 2 * curr.y + next.y);
-//        f.x -= 0.5*weight * (next.x - curr.x);
-//        f.y -= 0.5*weight * (next.y - curr.y);
+        // f.x -= 0.5*weight * (next.x - curr.x);
+        // f.y -= 0.5*weight * (next.y - curr.y);
     }
     
     void computeVolumeConstraint(double targetVolume)
@@ -751,7 +753,7 @@ public class Polygon2D extends ActiveContour
                 if ((penetration = target.contains(p)) > 0)
                 {
                     // feedbackForce.scale(-penetration, contourNormals[index]);
-                    feedbackForce.scaleAdd(-penetration, contourNormals[index], feedbackForce);
+                    feedbackForce.scaleAdd(-penetration / 2, contourNormals[index], feedbackForce);
                     modelForces[index].scale(0.05);
                 }
             }
@@ -833,36 +835,36 @@ public class Polygon2D extends ActiveContour
         switch (order)
         {
         
-            case 0: // number of points
+        case 0: // number of points
+        {
+            return points.size();
+        }
+        
+        case 1: // perimeter
+        {
+            int size = points.size();
+            
+            Point3d p1 = points.get(size - 1);
+            Point3d p2 = points.get(0);
+            
+            double perimeter = p1.distance(p2);
+            
+            for (int i = 0; i < size - 1; i++)
             {
-                return points.size();
+                // shift pair of points by one index
+                p1 = p2;
+                p2 = points.get(i + 1);
+                perimeter += p1.distance(p2);
             }
             
-            case 1: // perimeter
-            {
-                int size = points.size();
-                
-                Point3d p1 = points.get(size - 1);
-                Point3d p2 = points.get(0);
-                
-                double perimeter = p1.distance(p2);
-                
-                for (int i = 0; i < size - 1; i++)
-                {
-                    // shift pair of points by one index
-                    p1 = p2;
-                    p2 = points.get(i + 1);
-                    perimeter += p1.distance(p2);
-                }
-                
-                return perimeter;
-            }
-            case 2: // area
-            {
-                return Math.abs(getAlgebraicInterior());
-            }
-            default:
-                throw new UnsupportedOperationException("Dimension " + order + " not implemented");
+            return perimeter;
+        }
+        case 2: // area
+        {
+            return Math.abs(getAlgebraicInterior());
+        }
+        default:
+            throw new UnsupportedOperationException("Dimension " + order + " not implemented");
         }
     }
     
