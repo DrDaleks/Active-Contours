@@ -244,20 +244,6 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         
         trackGroup = new TrackGroup(inputData);
         trackGroup.setDescription("Active contours (" + new Date().toString() + ")");
-        //
-        // ThreadUtil.invokeNow(new Runnable()
-        // {
-        // @Override
-        // public void run()
-        // {
-        // trackGroup.setDescription("Active contours (" + new Date().toString() + ")");
-        // if (tracking.getValue())
-        // {
-        // SwimmingObject object = new SwimmingObject(trackGroup);
-        // Icy.getMainInterface().getSwimmingPool().add(object);
-        // }
-        // }
-        // });
         
         // replace any ActiveContours Painter object on the sequence by ours
         for (Overlay overlay : inputData.getOverlays())
@@ -348,7 +334,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         }
         
         // smooth the signal first
-        Sequence gaussian = Kernels1D.CUSTOM_GAUSSIAN.createGaussianKernel1D(1.5).toSequence();
+        Sequence gaussian = Kernels1D.CUSTOM_GAUSSIAN.createGaussianKernel1D(1).toSequence();
         try
         {
             Convolution1D.convolve(currentFrame_float, gaussian, gaussian, null);
@@ -360,7 +346,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         
         // 1) Initialize the edge data
         {
-            if (edge_c.getValue() == region_c.getValue() && edge_weight.getValue() > 0)
+            if (edge_c.getValue() == region_c.getValue() && edge_weight.getValue() > 0 && region_weight.getValue() > 0)
             {
                 // find edges within the region-based information
                 // compute the gradient magnitude
@@ -388,7 +374,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                     // rescale to [0-1]
                     edgeData.updateChannelsBounds(true);
                     edgeData = SequenceUtil.convertToType(edgeData, edgeData.getDataType_(), true, true);
-//                     addSequence(edgeData);
+                    // addSequence(edgeData);
                 }
                 catch (ConvolutionException e)
                 {
@@ -448,6 +434,29 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 
                 final ROI2D roi2d = (ROI2D) roi;
                 
+                final int realZ;
+                if (roi2d.getZ() == -1)
+                {
+                    // a 2D contour cannot be created from a "virtually 3D" ROI,
+                    // merely a slice of it => which one?
+                    if (getUI() != null)
+                    {
+                        realZ = inputData.getFirstViewer().getPositionZ();
+                    }
+                    else
+                    {
+                        if (inputData.getSizeZ() > 0)
+                        {
+                            System.err.println("WARNING: cannot create a 2D contour from a ROI of infinite Z dimension, will use Z=0");
+                        }
+                        realZ = 0;
+                    }
+                }
+                else
+                {
+                    realZ = roi2d.getZ();
+                }
+                
                 Runnable initializer = new Runnable()
                 {
                     public void run()
@@ -462,12 +471,12 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                             for (BooleanMask2D comp : components)
                             {
                                 ROI2DArea roi = new ROI2DArea(comp);
-                                final ActiveContour contour = new Polygon2D(ActiveContours.this, contour_resolution, contour_minArea, new SlidingWindow(convergence_winSize.getValue()), roi);
+                                final SlidingWindow window = new SlidingWindow(convergence_winSize.getValue());
+                                final ActiveContour contour = new Polygon2D(ActiveContours.this, contour_resolution, contour_minArea, window, roi);
                                 contour.setX(roi.getBounds2D().getCenterX());
                                 contour.setY(roi.getBounds2D().getCenterY());
+                                contour.setZ(realZ);
                                 contour.setT(t);
-                                
-                                if (!isHeadLess()) contour.setZ(inputData.getFirstViewer().getPositionZ());
                                 
                                 TrackSegment segment = new TrackSegment();
                                 segment.addDetection(contour);
@@ -483,12 +492,12 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                         }
                         else
                         {
-                            final ActiveContour contour = new Polygon2D(ActiveContours.this, contour_resolution, contour_minArea, new SlidingWindow(convergence_winSize.getValue()), roi2d);
+                            final SlidingWindow window = new SlidingWindow(convergence_winSize.getValue());
+                            final ActiveContour contour = new Polygon2D(ActiveContours.this, contour_resolution, contour_minArea, window, roi2d);
                             contour.setX(roi2d.getBounds2D().getCenterX());
                             contour.setY(roi2d.getBounds2D().getCenterY());
+                            contour.setZ(realZ);
                             contour.setT(t);
-                            
-                            if (!isHeadLess()) contour.setZ(inputData.getFirstViewer().getPositionZ());
                             
                             TrackSegment segment = new TrackSegment();
                             segment.addDetection(contour);
@@ -924,6 +933,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         edge_c.setValues(0, 0, 16, 1);
         inputMap.add("edge: channel", edge_c.getVariable());
         inputMap.add("region: weight", region_weight.getVariable());
+        inputMap.add("region: sensitivity", region_sensitivity.getVariable());
         region_c.setActive(false);
         region_c.setValues(0, 0, 16, 1);
         inputMap.add("region: channel", region_c.getVariable());
