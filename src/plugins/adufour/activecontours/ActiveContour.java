@@ -8,15 +8,14 @@ import java.awt.Color;
 import javax.media.j3d.BoundingSphere;
 import javax.vecmath.Point3d;
 
+import plugins.adufour.activecontours.ActiveContours.ROIType;
 import plugins.adufour.ezplug.EzVarDouble;
-import plugins.adufour.ezplug.EzVarInteger;
 import plugins.nchenouard.spot.Detection;
 
 /**
  * A generic active contour
  * 
  * @author Alexandre Dufour
- * 
  * @param <C>
  *            the type of contour (see {@link Polygon2D})
  * @param <R>
@@ -36,15 +35,12 @@ public abstract class ActiveContour extends Detection implements Iterable<Point3
     
     protected final EzVarDouble    contour_resolution;
     
-    protected final EzVarInteger   contour_minArea;
-    
-    protected ActiveContour(ActiveContours owner, EzVarDouble contour_resolution, EzVarInteger contour_minArea, SlidingWindow convergenceWindow)
+    protected ActiveContour(ActiveContours owner, EzVarDouble contour_resolution, SlidingWindow convergenceWindow)
     {
         super(0, 0, 0, 0);
         
         this.owner = owner;
         this.contour_resolution = contour_resolution;
-        this.contour_minArea = contour_minArea;
         this.convergence = convergenceWindow;
         
         setColor(Color.getHSBColor((float) Math.random(), 0.8f, 0.9f));
@@ -57,8 +53,7 @@ public abstract class ActiveContour extends Detection implements Iterable<Point3
      */
     protected ActiveContour(ActiveContour contour)
     {
-        this(contour.owner, contour.contour_resolution, contour.contour_minArea, new SlidingWindow(contour.convergence.size));
-        // TODO later on, clone the resolution variables as well if needed
+        this(contour.owner, contour.contour_resolution, new SlidingWindow(contour.convergence.size));
         
         setX(contour.x);
         setY(contour.y);
@@ -200,7 +195,6 @@ public abstract class ActiveContour extends Detection implements Iterable<Point3
     public abstract double contains(Point3d p);
     
     /**
-     * 
      * @param order
      *            the dimension (a.k.a. norm) to compute:<br/>
      *            <ul>
@@ -213,8 +207,15 @@ public abstract class ActiveContour extends Detection implements Iterable<Point3
     public abstract double getDimension(int order);
     
     /**
-     * 
      * @return a ROI representing the contour
+     * @deprecated use {@link #toROI(ROIType)} instead
      */
     public abstract ROI toROI();
+    
+    /**
+     * @param type
+     *            the type of ROI to export
+     * @return a ROI representing the contour
+     */
+    public abstract ROI toROI(ROIType type);
 }

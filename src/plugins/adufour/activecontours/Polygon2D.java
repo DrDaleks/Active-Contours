@@ -17,17 +17,19 @@ import java.awt.Rectangle;
 import java.awt.geom.Line2D;
 import java.awt.geom.Path2D;
 import java.awt.geom.PathIterator;
+import java.awt.geom.Point2D;
 import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.List;
 
 import javax.media.j3d.BoundingSphere;
 import javax.vecmath.Point3d;
 import javax.vecmath.Vector3d;
 
+import plugins.adufour.activecontours.ActiveContours.ROIType;
 import plugins.adufour.blocks.tools.roi.DilateROI;
 import plugins.adufour.ezplug.EzException;
 import plugins.adufour.ezplug.EzVarDouble;
-import plugins.adufour.ezplug.EzVarInteger;
 import plugins.adufour.morphology.FillHolesInROI;
 import plugins.kernel.roi.roi2d.ROI2DArea;
 import plugins.kernel.roi.roi2d.ROI2DEllipse;
@@ -96,9 +98,9 @@ public class Polygon2D extends ActiveContour
     
     private boolean              counterClockWise;
     
-    protected Polygon2D(ActiveContours owner, EzVarDouble contour_resolution, EzVarInteger contour_minArea, SlidingWindow convergenceWindow)
+    protected Polygon2D(ActiveContours owner, EzVarDouble contour_resolution, SlidingWindow convergenceWindow)
     {
-        super(owner, contour_resolution, contour_minArea, convergenceWindow);
+        super(owner, contour_resolution, convergenceWindow);
         
         setColor(Color.getHSBColor((float) Math.random(), 0.8f, 0.9f));
     }
@@ -110,8 +112,7 @@ public class Polygon2D extends ActiveContour
      */
     public Polygon2D(Polygon2D contour)
     {
-        this(contour.owner, contour.contour_resolution, contour.contour_minArea, new SlidingWindow(contour.convergence.size));
-        // TODO later on, clone the resolution variables as well if needed
+        this(contour.owner, contour.contour_resolution, new SlidingWindow(contour.convergence.size));
         
         setX(contour.x);
         setY(contour.y);
@@ -129,9 +130,9 @@ public class Polygon2D extends ActiveContour
         counterClockWise = (getAlgebraicInterior() > 0);
     }
     
-    public Polygon2D(ActiveContours owner, EzVarDouble contour_resolution, EzVarInteger contour_minArea, SlidingWindow convergenceWindow, ROI2D roi)
+    public Polygon2D(ActiveContours owner, EzVarDouble contour_resolution, SlidingWindow convergenceWindow, ROI2D roi)
     {
-        this(owner, contour_resolution, contour_minArea, convergenceWindow);
+        this(owner, contour_resolution, convergenceWindow);
         
         if (!(roi instanceof ROI2DEllipse) && !(roi instanceof ROI2DRectangle) && !(roi instanceof ROI2DPolygon) && !(roi instanceof ROI2DArea))
         {
@@ -161,22 +162,14 @@ public class Polygon2D extends ActiveContour
                 roi = new ROI2DEllipse(roi.getBounds2D());
             }
             
-            if (points.size() == 0)
+            if (points.size() < 4)
             {
                 // replace by ellipse
                 roi = new ROI2DEllipse(roi.getBounds2D());
             }
             else
             {
-                area = getAlgebraicInterior();
-                if (Math.abs(area) < contour_minArea.getValue())
-                {
-                    roi = new ROI2DEllipse(roi.getBounds2D());
-                }
-                else
-                {
-                    contourOK = true;
-                }
+                contourOK = true;
             }
         }
         
@@ -298,7 +291,7 @@ public class Polygon2D extends ActiveContour
      *         small, or an array of Contour2Ds with 0 elements if both contours are too small, and
      *         2 elements if both contours are viable
      */
-    private Polygon2D[] checkSelfIntersection(double minSpacing, double minArea)
+    private Polygon2D[] checkSelfIntersection(double minSpacing)
     {
         int i = 0, j = 0, n = points.size();
         Point3d p_i = null, p_j = null;
@@ -349,7 +342,7 @@ public class Polygon2D extends ActiveContour
         Point3d center = new Point3d();
         
         int nPoints = j - i;
-        Polygon2D c1 = new Polygon2D(this.owner, contour_resolution, contour_minArea, new SlidingWindow(this.convergence.size));
+        Polygon2D c1 = new Polygon2D(this.owner, contour_resolution, new SlidingWindow(this.convergence.size));
         for (int p = 0; p < nPoints; p++)
         {
             Point3d pp = points.get(p + i);
@@ -365,7 +358,7 @@ public class Polygon2D extends ActiveContour
         center.set(0, 0, 0);
         
         nPoints = i + n - j;
-        Polygon2D c2 = new Polygon2D(this.owner, contour_resolution, contour_minArea, new SlidingWindow(this.convergence.size));
+        Polygon2D c2 = new Polygon2D(this.owner, contour_resolution, new SlidingWindow(this.convergence.size));
         for (int p = 0, pj = p + j; p < nPoints; p++, pj++)
         {
             Point3d pp = points.get(pj < n ? pj : pj - n);
@@ -395,24 +388,24 @@ public class Polygon2D extends ActiveContour
             // if only one of the two children has a size lower than minArea, then the division
             // should be considered as an artifact loop, the other child thus is the new contour
             
-            if (c1area > minArea)
+            if (c1area < c2area / 10)
             {
-                if (c2area > minArea) return new Polygon2D[] { c1, c2 };
-                
-                points.clear();
-                points.addAll(c1.points);
-                
-                return null;
-            }
-            else
-            {
-                if (c2area < minArea) return new Polygon2D[] {};
-                
+                // remove c1 (too small)
                 points.clear();
                 points.addAll(c2.points);
-                
                 return null;
             }
+            
+            if (c2area < c1area / 10)
+            {
+                // remove c2 (too small)
+                points.clear();
+                points.addAll(c1.points);
+                return null;
+            }
+            
+            // keep both then...
+            return new Polygon2D[] { c1, c2 };
         }
         else
         {
@@ -1041,7 +1034,7 @@ public class Polygon2D extends ActiveContour
     @Override
     public void reSample(double minFactor, double maxFactor) throws TopologyException
     {
-        if (getDimension(2) < contour_minArea.getValue()) throw new TopologyException(this, new Polygon2D[] {});
+        if (getDimension(0) < 4) throw new TopologyException(this, new Polygon2D[] {});
         
         double minLength = contour_resolution.getValue() * minFactor;
         double maxLength = contour_resolution.getValue() * maxFactor;
@@ -1060,7 +1053,7 @@ public class Polygon2D extends ActiveContour
             updateNormalsIfNeeded();
         }
         
-        Polygon2D[] children = checkSelfIntersection(contour_resolution.getValue(), contour_minArea.getValue());
+        Polygon2D[] children = checkSelfIntersection(contour_resolution.getValue());
         
         if (children != null) throw new TopologyException(this, children);
         
@@ -1374,9 +1367,33 @@ public class Polygon2D extends ActiveContour
     @Override
     public ROI2D toROI()
     {
-        ROI2DArea area = new ROI2DArea();
-        area.addShape(path);
-        area.setT(t);
-        return area;
+        return toROI(ROIType.AREA);
+    }
+    
+    @Override
+    public ROI2D toROI(ROIType type)
+    {
+        ROI2D roi;
+        
+        switch (type)
+        {
+        case AREA:
+            roi = new ROI2DArea();
+            ((ROI2DArea) roi).addShape(path);
+            break;
+        
+        case POLYGON:
+            List<Point2D> p2d = new ArrayList<Point2D>(points.size());
+            for (Point3d p : this)
+                p2d.add(new Point2D.Double(p.x, p.y));
+            roi = new ROI2DPolygon(p2d);            
+            break;
+        
+        default:
+            throw new IllegalArgumentException("ROI of type " + type + " cannot be exported yet");
+        }
+        
+        roi.setT(t);
+        return roi;
     }
 }

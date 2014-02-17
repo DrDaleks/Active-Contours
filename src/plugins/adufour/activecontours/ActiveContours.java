@@ -92,7 +92,6 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     public final EzGroup              evolution             = new EzGroup("Evolution parameters");
     public final EzVarSequence        evolution_bounds      = new EzVarSequence("Bound field to ROI of");
     public final EzVarDouble          contour_resolution    = new EzVarDouble("Contour resolution", 2, 0.1, 1000.0, 0.1);
-    public final EzVarInteger         contour_minArea       = new EzVarInteger("Contour min. area", 10, 1, 100000000, 1);
     public final EzVarDouble          contour_timeStep      = new EzVarDouble("Evolution time step", 0.1, 0.1, 10, 0.01);
     public final EzVarInteger         convergence_winSize   = new EzVarInteger("Convergence window size", 50, 10, 10000, 10);
     public final EzVarEnum<Operation> convergence_operation = new EzVarEnum<SlidingWindow.Operation>("Convergence operation", Operation.values(), Operation.VAR_COEFF);
@@ -103,7 +102,13 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         NO, ON_INPUT, ON_NEW_IMAGE
     }
     
+    public enum ROIType
+    {
+        AREA, POLYGON,
+    }
+    
     public final EzVarEnum<ExportROI>     output_rois        = new EzVarEnum<ExportROI>("Export ROI", ExportROI.values(), ExportROI.NO);
+    public final EzVarEnum<ROIType>       output_roiType     = new EzVarEnum<ROIType>("Type of ROI", ROIType.values(), ROIType.AREA);
     
     public final EzVarBoolean             tracking           = new EzVarBoolean("Track objects over time", false);
     public final EzButton                 showTrackManager   = new EzButton("Send to track manager", new ActionListener()
@@ -191,9 +196,6 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         // contour
         contour_resolution.setToolTipText("Sets the contour(s) precision as the distance (in pixels) between control points");
         
-        contour_minArea.setToolTipText("Contours with a surface (in pixels) below this value will be removed");
-        showAdvancedOptions.addVisibilityTriggerTo(contour_minArea, true);
-        
         contour_timeStep.setToolTipText("Defines the evolution speed (warning: keep a low value to avoid vibration effects)");
         
         convergence_winSize.setToolTipText("Defines over how many iterations the algorithm should check for convergence");
@@ -208,7 +210,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         evolution_bounds.setToolTipText("Bounds the evolution of the contour to all ROI of the given sequence (select \"No sequence\" to deactivate)");
         showAdvancedOptions.addVisibilityTriggerTo(evolution_bounds, true);
         
-        evolution.addEzComponent(evolution_bounds, contour_resolution, contour_minArea, contour_timeStep, convergence_winSize, convergence_operation, convergence_criterion);
+        evolution.addEzComponent(evolution_bounds, contour_resolution, contour_timeStep, convergence_winSize, convergence_operation, convergence_criterion);
         addEzComponent(evolution);
         
         contour_resolution.addVarChangeListener(new EzVarListener<Double>()
@@ -221,8 +223,11 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         });
         
         // output
-        output_rois.setToolTipText("Clone the original sequence with results overlayed as ROIs");
+        output_rois.setToolTipText("Select whether and where to export the contours as ROI for further quantification");
         addEzComponent(output_rois);
+        output_roiType.setToolTipText("Select the type of ROI to export");
+        addEzComponent(output_roiType);
+        output_rois.addVisibilityTriggerTo(output_roiType, ExportROI.ON_INPUT, ExportROI.ON_NEW_IMAGE);
         
         tracking.setToolTipText("Track objects over time (no export)");
         addEzComponent(tracking);
@@ -445,7 +450,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                     }
                     else
                     {
-                        if (inputData.getSizeZ() > 0)
+                        if (inputData.getSizeZ() > 1)
                         {
                             System.err.println("WARNING: cannot create a 2D contour from a ROI of infinite Z dimension, will use Z=0");
                         }
@@ -472,7 +477,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                             {
                                 ROI2DArea roi = new ROI2DArea(comp);
                                 final SlidingWindow window = new SlidingWindow(convergence_winSize.getValue());
-                                final ActiveContour contour = new Polygon2D(ActiveContours.this, contour_resolution, contour_minArea, window, roi);
+                                final ActiveContour contour = new Polygon2D(ActiveContours.this, contour_resolution, window, roi);
                                 contour.setX(roi.getBounds2D().getCenterX());
                                 contour.setY(roi.getBounds2D().getCenterY());
                                 contour.setZ(realZ);
@@ -493,7 +498,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                         else
                         {
                             final SlidingWindow window = new SlidingWindow(convergence_winSize.getValue());
-                            final ActiveContour contour = new Polygon2D(ActiveContours.this, contour_resolution, contour_minArea, window, roi2d);
+                            final ActiveContour contour = new Polygon2D(ActiveContours.this, contour_resolution, window, roi2d);
                             contour.setX(roi2d.getBounds2D().getCenterX());
                             contour.setY(roi2d.getBounds2D().getCenterY());
                             contour.setZ(realZ);
@@ -893,7 +898,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             if (contour == null) continue;
             
             // output as ROIs
-            ROI roi = contour.toROI();
+            ROI roi = contour.toROI(output_roiType.getValue());
             roi.setName("Object #" + StringUtil.padZero(i, nbPaddingDigits + 1));
             roi.setColor(contour.getColor());
             rois.add(roi);
@@ -956,7 +961,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         inputMap.add("time step", contour_timeStep.getVariable());
         // inputMap.add("convergence window size", convergence_winSize.getVariable());
         inputMap.add("convergence value", convergence_criterion.getVariable());
-        
+        inputMap.add("type of ROI output", output_roiType.getVariable());
         inputMap.add("tracking", tracking.getVariable());
     }
     
