@@ -107,48 +107,50 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         AREA, POLYGON,
     }
     
-    public final EzVarEnum<ExportROI>     output_rois        = new EzVarEnum<ExportROI>("Export ROI", ExportROI.values(), ExportROI.NO);
-    public final EzVarEnum<ROIType>       output_roiType     = new EzVarEnum<ROIType>("Type of ROI", ROIType.values(), ROIType.AREA);
+    public final EzVarEnum<ExportROI>           output_rois        = new EzVarEnum<ExportROI>("Export ROI", ExportROI.values(), ExportROI.NO);
+    public final EzVarEnum<ROIType>             output_roiType     = new EzVarEnum<ROIType>("Type of ROI", ROIType.values(), ROIType.AREA);
     
-    public final EzVarBoolean             tracking           = new EzVarBoolean("Track objects over time", false);
-    public final EzButton                 showTrackManager   = new EzButton("Send to track manager", new ActionListener()
-                                                             {
-                                                                 @Override
-                                                                 public void actionPerformed(ActionEvent e)
-                                                                 {
-                                                                     ThreadUtil.invokeLater(new Runnable()
-                                                                     {
-                                                                         public void run()
-                                                                         {
-                                                                             if (trackGroup == null) return;
-                                                                             if (trackGroup.getTrackSegmentList().isEmpty()) return;
-                                                                             
-                                                                             Icy.getMainInterface().getSwimmingPool().add(new SwimmingObject(trackGroup));
-                                                                             TrackManager tm = new TrackManager();
-                                                                             tm.reOrganize();
-                                                                             tm.setDisplaySequence(inputData);
-                                                                         }
-                                                                     });
-                                                                 }
-                                                             });
+    public final EzVarBoolean                   tracking           = new EzVarBoolean("Track objects over time", false);
+    private final HashMap<TrackSegment, Double> volumes            = new HashMap<TrackSegment, Double>();
+    public final EzVarBoolean                   volume_constraint  = new EzVarBoolean("Volume constraint", false);
+    public final EzButton                       showTrackManager   = new EzButton("Send to track manager", new ActionListener()
+                                                                   {
+                                                                       @Override
+                                                                       public void actionPerformed(ActionEvent e)
+                                                                       {
+                                                                           ThreadUtil.invokeLater(new Runnable()
+                                                                           {
+                                                                               public void run()
+                                                                               {
+                                                                                   if (trackGroup == null) return;
+                                                                                   if (trackGroup.getTrackSegmentList().isEmpty()) return;
+                                                                                   
+                                                                                   Icy.getMainInterface().getSwimmingPool().add(new SwimmingObject(trackGroup));
+                                                                                   TrackManager tm = new TrackManager();
+                                                                                   tm.reOrganize();
+                                                                                   tm.setDisplaySequence(inputData);
+                                                                               }
+                                                                           });
+                                                                       }
+                                                                   });
     
-    private Sequence                      edgeData           = new Sequence("Edge information");
-    private Sequence                      contourMask_buffer = new Sequence("Mask data");
+    private Sequence                            edgeData           = new Sequence("Edge information");
+    private Sequence                            contourMask_buffer = new Sequence("Mask data");
     
-    private Sequence                      region_data;
-    private HashMap<TrackSegment, Double> region_cin         = new HashMap<TrackSegment, Double>(0);
-    private double                        region_cout;
+    private Sequence                            region_data;
+    private HashMap<TrackSegment, Double>       region_cin         = new HashMap<TrackSegment, Double>(0);
+    private double                              region_cout;
     
-    private VarROIArray                   roiInput           = new VarROIArray("input ROI");
-    private VarROIArray                   roiOutput          = new VarROIArray("Regions of interest");
+    private VarROIArray                         roiInput           = new VarROIArray("input ROI");
+    private VarROIArray                         roiOutput          = new VarROIArray("Regions of interest");
     
-    private boolean                       globalStop;
+    private boolean                             globalStop;
     
-    private TrackGroup                    trackGroup;
+    private TrackGroup                          trackGroup;
     
-    private ActiveContoursOverlay         overlay;
+    private ActiveContoursOverlay               overlay;
     
-    private ExecutorService               multiThreadService = Executors.newFixedThreadPool(SystemUtil.getAvailableProcessors() * 2);
+    private ExecutorService                     multiThreadService = Executors.newFixedThreadPool(SystemUtil.getAvailableProcessors() * 2);
     
     public TrackGroup getTrackGroup()
     {
@@ -231,6 +233,8 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         
         tracking.setToolTipText("Track objects over time (no export)");
         addEzComponent(tracking);
+        addEzComponent(volume_constraint);
+        tracking.addVisibilityTriggerTo(volume_constraint, true);
         addEzComponent(showTrackManager);
         
         setTimeDisplay(true);
@@ -643,8 +647,6 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         }
     }
     
-    HashMap<TrackSegment, Double> volumes = new HashMap<TrackSegment, Double>();
-    
     /**
      * Deform contours together (coupling involved)
      * 
@@ -675,6 +677,8 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             if (axis_weight.getValue() > EPSILON) contour.computeAxisForces(axis_weight.getValue());
             
             if (Math.abs(balloon_weight.getValue()) > EPSILON) contour.computeBalloonForces(balloon_weight.getValue());
+            
+            if (volume_constraint.getValue() && volumes.containsKey(segment)) contour.computeVolumeConstraint(volumes.get(segment));
             
             contour.move(field, contour_timeStep.getValue());
         }
@@ -716,7 +720,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                                 contour.computeFeedbackForces(otherContour);
                             }
                             
-                            if (volumes.containsKey(segment)) contour.computeVolumeConstraint(volumes.get(segment));
+                            if (volume_constraint.getValue() && volumes.containsKey(segment)) contour.computeVolumeConstraint(volumes.get(segment));
                         }
                         else
                         {
@@ -963,6 +967,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         inputMap.add("convergence value", convergence_criterion.getVariable());
         inputMap.add("type of ROI output", output_roiType.getVariable());
         inputMap.add("tracking", tracking.getVariable());
+        inputMap.add("volume constraint", volume_constraint.getVariable());
     }
     
     @Override
