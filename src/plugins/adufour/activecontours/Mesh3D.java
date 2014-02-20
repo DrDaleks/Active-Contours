@@ -32,10 +32,6 @@ import javax.vecmath.Vector3d;
 
 import plugins.adufour.activecontours.Mesh3D.Face;
 import plugins.adufour.activecontours.Mesh3D.Vertex;
-import plugins.adufour.activemeshes.mesh.ContourSplittingException;
-import plugins.adufour.activemeshes.mesh.Mesh;
-import plugins.adufour.activemeshes.mesh.MeshException;
-import plugins.adufour.activemeshes.mesh.MeshSplittingException;
 import plugins.adufour.ezplug.EzException;
 import plugins.adufour.ezplug.EzVarDouble;
 import plugins.adufour.ezplug.EzVarInteger;
