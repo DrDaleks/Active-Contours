@@ -5,6 +5,7 @@ import icy.sequence.Sequence;
 
 import java.awt.Color;
 
+import javax.media.j3d.BoundingBox;
 import javax.media.j3d.BoundingSphere;
 import javax.vecmath.Point3d;
 
@@ -16,31 +17,25 @@ import plugins.nchenouard.spot.Detection;
  * A generic active contour
  * 
  * @author Alexandre Dufour
- * @param <C>
- *            the type of contour (see {@link Polygon2D})
- * @param <R>
- *            the type of ROI defining the field bounds for this contour
  */
 public abstract class ActiveContour extends Detection implements Iterable<Point3d>
 {
     final ActiveContours           owner;
     
-    SlidingWindow                  convergence;
+    protected final SlidingWindow  convergence;
     
-    protected boolean              normalsNeedUpdate;
+    protected final EzVarDouble    resolution;
     
     protected final BoundingSphere boundingSphere = new BoundingSphere();
     
-    protected boolean              boundingSphereNeedsUpdate;
-    
-    protected final EzVarDouble    contour_resolution;
+    protected final BoundingBox    boundingBox    = new BoundingBox();
     
     protected ActiveContour(ActiveContours owner, EzVarDouble contour_resolution, SlidingWindow convergenceWindow)
     {
         super(0, 0, 0, 0);
         
         this.owner = owner;
-        this.contour_resolution = contour_resolution;
+        this.resolution = contour_resolution;
         this.convergence = convergenceWindow;
         
         setColor(Color.getHSBColor((float) Math.random(), 0.8f, 0.9f));
@@ -53,7 +48,7 @@ public abstract class ActiveContour extends Detection implements Iterable<Point3
      */
     protected ActiveContour(ActiveContour contour)
     {
-        this(contour.owner, contour.contour_resolution, new SlidingWindow(contour.convergence.size));
+        this(contour.owner, contour.resolution, new SlidingWindow(contour.convergence.getSize()));
         
         setX(contour.x);
         setY(contour.y);
@@ -67,64 +62,29 @@ public abstract class ActiveContour extends Detection implements Iterable<Point3
     @Override
     public abstract ActiveContour clone();
     
-    protected abstract void initFrom(ActiveContour contour);
-    
-    public void setConvergenceWindow(SlidingWindow window)
-    {
-        convergence = window;
-    }
-    
-    protected abstract void addPoint(Point3d p);
+    /**
+     * Adds the specified point to the contour. It is up to the implementing classes to determine
+     * whether the points should be added in a specific order or based on gemoetrical rules
+     * 
+     * @param p
+     *            the point to add
+     * @return the index indicating where the point has been inserted in the internal list
+     */
+    protected abstract int addPoint(Point3d p);
     
     /**
-     * Re-samples the Contour according to an 'average distance between points' criterion. This
-     * method ensures that the distance between two consecutive points is strictly comprised between
-     * a minimum value and a maximum value. In order to avoid oscillatory behavior, 'max' and 'min'
-     * should verify the following relations: min < 1, max > 1, 2*min <= max.
+     * Checks whether the contour is self-intersecting. Depending on the given parameters, a
+     * self-intersection can be considered as a loop or as a contour division.
      * 
-     * @param minFactor
-     *            the minimum distance between two points.
-     * @param maxFactor
-     *            the maximum distance between two points.
+     * @param minDistance
+     *            the distance threshold between non-neighboring points to detect self-intersection
+     * @return null if either no self-intersection is detected or if one of the new contours is too
+     *         small, or an array of contours with 0 elements if both contours are too small, and 2
+     *         elements if both contours are viable
      */
-    public abstract void reSample(double minFactor, double maxFactor) throws TopologyException;
+    protected abstract ActiveContour[] checkSelfIntersection(double minDistance);
     
-    abstract void move(ROI field, double timeStep);
-    
-    protected abstract void updateNormalsIfNeeded();
-    
-    public BoundingSphere getBoundingSphere()
-    {
-        if (!boundingSphereNeedsUpdate) return boundingSphere;
-        
-        Point3d center = new Point3d();
-        double radius = 0;
-        
-        // center calculation
-        {
-            double nbPts = 0;
-            for (Point3d p : this)
-            {
-                center.add(p);
-                nbPts++;
-            }
-            center.scale(1.0 / nbPts);
-        }
-        boundingSphere.setCenter(center);
-        
-        // radius calculation
-        {
-            for (Point3d p : this)
-            {
-                double d = p.distance(center);
-                
-                if (d > radius) radius = d;
-            }
-        }
-        boundingSphere.setRadius(radius);
-        boundingSphereNeedsUpdate = false;
-        return boundingSphere;
-    }
+    protected abstract void initFrom(ActiveContour contour);
     
     /**
      * Update the axis constraint force, which adjusts the takes the final forces and normalize them
@@ -194,6 +154,32 @@ public abstract class ActiveContour extends Detection implements Iterable<Point3
      */
     public abstract double contains(Point3d p);
     
+    public BoundingBox getBoundingBox()
+    {
+        BoundingBox bbox = new BoundingBox();
+        double minX = Double.MAX_VALUE;
+        double minY = Double.MAX_VALUE;
+        double minZ = Double.MAX_VALUE;
+        double maxX = 0.0;
+        double maxY = 0.0;
+        double maxZ = 0.0;
+        
+        for (Point3d p : this)
+        {
+            if (p.x < minX) minX = p.x;
+            if (p.y < minY) minY = p.y;
+            if (p.z < minZ) minZ = p.z;
+            if (p.x > maxX) maxX = p.x;
+            if (p.y > maxY) maxY = p.y;
+            if (p.z > maxZ) maxZ = p.z;
+        }
+        
+        bbox.setLower(minX, minY, minZ);
+        bbox.setUpper(maxX, maxY, maxZ);
+        
+        return bbox;
+    }
+    
     /**
      * @param order
      *            the dimension (a.k.a. norm) to compute:<br/>
@@ -205,6 +191,21 @@ public abstract class ActiveContour extends Detection implements Iterable<Point3
      * @return the dimension for the specified order
      */
     public abstract double getDimension(int order);
+    
+    abstract void move(ROI field, double timeStep);
+    
+    /**
+     * Re-samples the Contour according to an 'average distance between points' criterion. This
+     * method ensures that the distance between two consecutive points is strictly comprised between
+     * a minimum value and a maximum value. In order to avoid oscillatory behavior, 'max' and 'min'
+     * should verify the following relations: min < 1, max > 1, 2*min <= max.
+     * 
+     * @param minFactor
+     *            the minimum distance between two points.
+     * @param maxFactor
+     *            the maximum distance between two points.
+     */
+    public abstract void reSample(double minFactor, double maxFactor) throws TopologyException;
     
     /**
      * @return a ROI representing the contour
@@ -218,4 +219,78 @@ public abstract class ActiveContour extends Detection implements Iterable<Point3
      * @return a ROI representing the contour
      */
     public abstract ROI toROI(ROIType type);
+    
+    /**
+     * Paints the contour onto the specified sequence with the specified value
+     * 
+     * @param output
+     * @param value
+     */
+    public abstract void toSequence(Sequence output, double value);
+    
+    /**
+     * Updates the contour's meta-data (i.e. data that can be computed directly from the actual
+     * contour data, but stored locally for fast repetitive access). This includes:<br/>
+     * <ul>
+     * <li>bounding box</li>
+     * <li>bounding sphere</li>
+     * <li>contour normals</li>
+     * <li>center of mass</li>
+     * </ul>
+     */
+    protected void updateMetaData()
+    {
+        // center of mass
+        Point3d center = new Point3d();
+        
+        // bounding sphere
+        double radius = 0;
+        
+        // bounding box
+        double minX = Double.MAX_VALUE;
+        double minY = Double.MAX_VALUE;
+        double minZ = Double.MAX_VALUE;
+        double maxX = 0.0;
+        double maxY = 0.0;
+        double maxZ = 0.0;
+        
+        // center calculation
+        double nbPts = 0;
+        for (Point3d p : this)
+        {
+            nbPts++;
+            
+            center.add(p);
+            if (p.x < minX) minX = p.x;
+            if (p.y < minY) minY = p.y;
+            if (p.z < minZ) minZ = p.z;
+            if (p.x > maxX) maxX = p.x;
+            if (p.y > maxY) maxY = p.y;
+            if (p.z > maxZ) maxZ = p.z;
+        }
+        
+        center.scale(1.0 / nbPts);
+        setX(center.x);
+        setY(center.y);
+        setZ(center.z);
+        
+        boundingSphere.setCenter(center);
+        
+        // radius calculation
+        for (Point3d p : this)
+        {
+            double d = p.distance(center);
+            
+            if (d > radius) radius = d;
+        }
+        
+        boundingSphere.setRadius(radius);
+        
+        boundingBox.setLower(minX, minY, minZ);
+        boundingBox.setUpper(maxX, maxY, maxZ);
+        
+        updateNormals();
+    }
+
+    protected abstract void updateNormals();
 }

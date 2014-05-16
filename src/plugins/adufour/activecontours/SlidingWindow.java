@@ -7,7 +7,6 @@ import icy.math.ArrayMath;
  * against various criteria
  * 
  * @author Alexandre Dufour
- * 
  */
 public class SlidingWindow
 {
@@ -15,7 +14,6 @@ public class SlidingWindow
      * The list of operations that can be applied on the window
      * 
      * @author Alexandre Dufour
-     * 
      */
     public enum Operation
     {
@@ -26,14 +24,9 @@ public class SlidingWindow
         VAR_COEFF
     };
     
-    /**
-     * The window size
-     */
-    public final int       size;
+    private double[] window;
     
-    private final double[] window;
-    
-    private int            count = 0;
+    private int      count = 0;
     
     /**
      * Creates a new convergence window with given size, operation and convergence test sorting
@@ -44,8 +37,18 @@ public class SlidingWindow
      */
     public SlidingWindow(int size)
     {
-        this.size = size;
+        setSize(size);
+    }
+    
+    public int getSize()
+    {
+        return window.length;
+    }
+    
+    public void setSize(int size)
+    {
         window = new double[size];
+        count = 0;
     }
     
     /**
@@ -53,11 +56,11 @@ public class SlidingWindow
      * 
      * @param value
      */
-    public final void add(double value)
+    public final void push(double value)
     {
         // skip every other value to prevent oscillation effects
         if (count % 1 == 0) window[(count / 2) % window.length] = value;
-//        window[count % window.length] = value;
+        // window[count % window.length] = value;
         count++;
     }
     
@@ -76,22 +79,22 @@ public class SlidingWindow
         
         switch (operation)
         {
-            case NONE:
-                return null;
-            case MIN:
-                return ArrayMath.min(window);
-            case MAX:
-                return ArrayMath.max(window);
-            case MEAN:
-                return ArrayMath.mean(window);
-            case SUM:
-                return ArrayMath.sum(window);
-            case VARIANCE:
-                return ArrayMath.var(window, true);
-            case VAR_COEFF:
-                return ArrayMath.std(window, false) / ArrayMath.mean(window);
-            default:
-                throw new UnsupportedOperationException("operation " + operation.toString() + " not supported yet");
+        case NONE:
+            return null;
+        case MIN:
+            return ArrayMath.min(window);
+        case MAX:
+            return ArrayMath.max(window);
+        case MEAN:
+            return ArrayMath.mean(window);
+        case SUM:
+            return ArrayMath.sum(window);
+        case VARIANCE:
+            return ArrayMath.var(window, true);
+        case VAR_COEFF:
+            return ArrayMath.std(window, false) / ArrayMath.mean(window);
+        default:
+            throw new UnsupportedOperationException("operation " + operation.toString() + " not supported yet");
         }
     }
 }

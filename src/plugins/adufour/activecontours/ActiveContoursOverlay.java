@@ -6,6 +6,7 @@ import icy.sequence.Sequence;
 
 import java.awt.Graphics2D;
 import java.util.ArrayList;
+import java.util.ConcurrentModificationException;
 import java.util.HashMap;
 
 import plugins.fab.trackmanager.TrackGroup;
@@ -32,14 +33,17 @@ public class ActiveContoursOverlay extends Overlay
     @Override
     public void paint(Graphics2D g, Sequence sequence, IcyCanvas canvas)
     {
-        if (g == null) return;
-        
         int t = canvas.getPositionT();
         
         if (trackGroup == null)
         {
-            if (contoursMap.containsKey(t)) for (ActiveContour contour : contoursMap.get(t))
-                contour.paint(g, sequence, canvas);
+            if (contoursMap.containsKey(t))
+            {
+                for (ActiveContour contour : contoursMap.get(t))
+                {
+                    contour.paint(g, sequence, canvas);
+                }
+            }
         }
         else
         {
@@ -49,13 +53,25 @@ public class ActiveContoursOverlay extends Overlay
             {
                 TrackSegment segment = segments.get(i - 1);
                 
-                ActiveContour contour = (ActiveContour) segment.getDetectionAtTime(t);
-                if (contour == null) continue;
-                contour.paint(g, sequence, canvas);
-                
-                // draw the contour number in its center (and mind the zoom factor)
-                float f = (float) canvas.canvasToImageLogDeltaX(18);
-                g.drawString("" + i, (float) contour.getX() - (i < 10 ? f / 2 : f), (float) contour.getY() + f / 2);
+                try
+                {
+                    ActiveContour contour = (ActiveContour) segment.getDetectionAtTime(t);
+                    if (contour == null) continue;
+                    
+                    contour.paint(g, sequence, canvas);
+                    
+                    if (g != null)
+                    {
+                        // in 2D, draw the contour number in its center (and mind the zoom factor)
+                        float f = (float) canvas.canvasToImageLogDeltaX(18);
+                        g.drawString("" + i, (float) contour.getX() - (i < 10 ? f / 2 : f), (float) contour.getY() + f / 2);
+                    }
+                }
+                catch (ConcurrentModificationException e)
+                {
+                    // segment has probably changed while looking for a detection to paint
+                    // => ignore and wait for the next repaint
+                }
             }
         }
     }

@@ -1,33 +1,37 @@
 package plugins.adufour.activecontours;
 
 import icy.canvas.IcyCanvas;
+import icy.canvas.IcyCanvas2D;
 import icy.gui.frame.progress.AnnounceFrame;
-import icy.image.IcyBufferedImage;
+import icy.main.Icy;
 import icy.roi.BooleanMask2D;
 import icy.roi.ROI;
 import icy.roi.ROI2D;
 import icy.sequence.Sequence;
 import icy.type.DataType;
+import icy.type.collection.array.Array1DUtil;
 
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Font;
 import java.awt.Graphics2D;
+import java.awt.Point;
 import java.awt.Rectangle;
+import java.awt.RenderingHints;
 import java.awt.geom.Line2D;
 import java.awt.geom.Path2D;
 import java.awt.geom.PathIterator;
 import java.awt.geom.Point2D;
+import java.awt.geom.Rectangle2D;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.TreeSet;
 
-import javax.media.j3d.BoundingSphere;
 import javax.vecmath.Point3d;
 import javax.vecmath.Vector3d;
 
 import plugins.adufour.activecontours.ActiveContours.ROIType;
-import plugins.adufour.blocks.tools.roi.DilateROI;
 import plugins.adufour.ezplug.EzException;
 import plugins.adufour.ezplug.EzVarDouble;
 import plugins.adufour.morphology.FillHolesInROI;
@@ -84,11 +88,11 @@ public class Polygon2D extends ActiveContour
     
     private final FillHolesInROI holeFiller = new FillHolesInROI();
     
-    private final DilateROI      dilator    = new DilateROI();
-    
     final ArrayList<Point3d>     points     = new ArrayList<Point3d>();
     
     Path2D.Double                path       = new Path2D.Double();
+    
+    double                       cout       = 0.0;
     
     private Vector3d[]           modelForces;
     
@@ -112,22 +116,34 @@ public class Polygon2D extends ActiveContour
      */
     public Polygon2D(Polygon2D contour)
     {
-        this(contour.owner, contour.contour_resolution, new SlidingWindow(contour.convergence.size));
+        this(contour.owner, contour.resolution, new SlidingWindow(contour.convergence.getSize()));
         
         setX(contour.x);
         setY(contour.y);
         setZ(contour.z);
         
         setColor(contour.getColor());
-        points.ensureCapacity(contour.points.size());
+        int n = contour.points.size();
         
-        for (Point3d p : contour.points)
-            addPoint(new Point3d(p));
+        points.ensureCapacity(n);
+        contourNormals = new Vector3d[n];
         
-        // in any case, don't forget to close the path
+        for (int i = 0; i < n; i++)
+        {
+            contourNormals[i] = new Vector3d();
+            addPoint(new Point3d(contour.points.get(i)));
+        }
+        
+        updateNormals();
+        
+        for (int i = 0; i < n; i++)
+        {
+            Point3d p = points.get(i);
+            p.scaleAdd(2.0, contourNormals[i], p);
+        }
+        
         updatePath();
-        
-        counterClockWise = (getAlgebraicInterior() > 0);
+        counterClockWise = contour.counterClockWise;
     }
     
     public Polygon2D(ActiveContours owner, EzVarDouble contour_resolution, SlidingWindow convergenceWindow, ROI2D roi)
@@ -142,12 +158,11 @@ public class Polygon2D extends ActiveContour
         setZ(roi.getZ());
         
         boolean contourOK = false;
-        double area = 0;
         
         if (roi instanceof ROI2DArea)
         {
             // dilate ROI
-            roi = (ROI2D) dilator.dilateROI(roi, 1, 1, 0);
+            roi = dilateROI(roi, 1, 1);
             
             // fill holes first
             BooleanMask2D mask = roi.getBooleanMask(true);
@@ -214,162 +229,162 @@ public class Polygon2D extends ActiveContour
                 }
             }
             
-            updatePath();
-            
-            area = getAlgebraicInterior();
-            
+            updateMetaData();
+            counterClockWise = (getAlgebraicInterior() > 0);
         }
-        
-        counterClockWise = (area > 0);
     }
     
-    protected void addPoint(Point3d p)
+    protected int addPoint(Point3d p)
     {
         points.add(p);
-    }
-    
-    @Override
-    public Polygon2D clone()
-    {
-        return new Polygon2D(this);
-    }
-    
-    private static void createEdge(ArrayList<Segment> segments, double xStart, double yStart, double xEnd, double yEnd)
-    {
-        double EPSILON = 0.00001;
-        
-        Point3d head = new Point3d(xStart, yStart, 0);
-        Point3d tail = new Point3d(xEnd, yEnd, 0);
-        
-        if (segments.size() == 0)
-        {
-            segments.add(new Segment(head, tail));
-            return;
-        }
-        
-        int insertAtTailOf = -1, insertAtHeadOf = -1;
-        
-        for (int i = 0; i < segments.size(); i++)
-        {
-            if (tail.distance(segments.get(i).getHead()) <= EPSILON)
-                insertAtHeadOf = i;
-            else if (head.distance(segments.get(i).getTail()) <= EPSILON) insertAtTailOf = i;
-        }
-        
-        if (insertAtTailOf >= 0)
-        {
-            if (insertAtHeadOf >= 0)
-            {
-                segments.get(insertAtHeadOf).addHead(segments.get(insertAtTailOf));
-                segments.remove(insertAtTailOf);
-            }
-            else
-            {
-                segments.get(insertAtTailOf).addTail(tail);
-            }
-        }
-        else if (insertAtHeadOf >= 0)
-        {
-            segments.get(insertAtHeadOf).addHead(head);
-        }
-        else
-        {
-            segments.add(new Segment(head, tail));
-        }
+        return points.size();
     }
     
     /**
      * Checks whether the contour is self-intersecting. Depending on the given parameters, a
      * self-intersection can be considered as a loop or as a contour division.
      * 
-     * @param minSpacing
+     * @param minDistance
      *            the distance threshold between non-neighboring points to detect self-intersection
-     * @param minArea
-     *            if a self-intersection is detected, this value specifies if the new contours are
-     *            kept or eliminated
      * @return null if either no self-intersection is detected or if one of the new contours is too
-     *         small, or an array of Contour2Ds with 0 elements if both contours are too small, and
-     *         2 elements if both contours are viable
+     *         small, or an array of contours with 0 elements if both contours are too small, and 2
+     *         elements if both contours are viable
      */
-    private Polygon2D[] checkSelfIntersection(double minSpacing)
+    protected Polygon2D[] checkSelfIntersection(double minDistance)
     {
         int i = 0, j = 0, n = points.size();
         Point3d p_i = null, p_j = null;
         
-        boolean intersection = false;
+        double divisionDistQ = boundingSphere.getRadius() * 0.5;
+        divisionDistQ *= divisionDistQ;
         
+        double minDistanceQ = minDistance;
+        minDistanceQ *= minDistanceQ;
+        
+        boolean selfIntersection = false;
+        
+        loop:
         for (i = 0; i < n; i++)
         {
             p_i = points.get(i);
+            Vector3d n_i = contourNormals[i];
             
             for (j = i + 2; j < n - 1; j++)
             {
                 p_j = points.get(j);
+                Vector3d n_j = contourNormals[j];
                 
-                intersection = (p_i.distance(p_j) < minSpacing);
+                double distQ = p_i.distanceSquared(p_j);
                 
-                if (intersection)
+                if (distQ < minDistanceQ)
                 {
+                    // local self-intersection
                     // deal with the special case that i and j are 2 points away
                     
                     if (i == 0 && j == n - 2)
                     {
                         n--;
                         points.remove(n);
-                        intersection = false;
+                        continue;
                     }
                     else if (i == 1 && j == n - 1)
                     {
                         points.remove(0);
                         n--;
-                        intersection = false;
+                        continue;
                     }
                     else if (j == i + 2)
                     {
                         points.remove(i + 1);
                         n--;
-                        intersection = false;
+                        continue;
+                    }
+                    
+                    // a real self-intersection is happening
+                    selfIntersection = true;
+                    break loop;
+                }
+                else
+                {
+                    // self-intersection always involved opposite normals
+                    if (n_i.dot(n_j) > -0.8) continue;
+                    
+                    // look for division
+                    
+                    // are points sufficiently close?
+                    // => use the bounding radius / 2
+                    if (distQ < divisionDistQ)
+                    {
+                        // are points located "in front" of each other?
+                        if ((j - i) > (2 * n / 5) && (j - i) < (3 * n / 5))
+                        {
+                            Vector3d vi1 = new Vector3d(points.get((i + n - 4) % n));
+                            Vector3d vi2 = new Vector3d(points.get((i + 4) % n));
+                            vi1.sub(p_i);
+                            vi2.sub(p_i);
+                            vi1.normalize();
+                            vi2.normalize();
+                            vi1.cross(vi1, vi2);
+                            double vi_lQ = vi1.lengthSquared();
+                            // System.out.println(vi1.lengthSquared());
+                            Vector3d vj1 = new Vector3d(points.get((j + n - 4) % n));
+                            Vector3d vj2 = new Vector3d(points.get((j + 4) % n));
+                            vj1.sub(p_j);
+                            vj2.sub(p_j);
+                            vj1.normalize();
+                            vj2.normalize();
+                            vj1.cross(vj1, vj2);
+                            double vj_lQ = vj1.lengthSquared();
+                            // System.out.println(vj1.lengthSquared());
+                            
+                            // curvature has to be at a relative minimum
+                            if (vi_lQ < 0.5 && vj_lQ < 0.5) continue;
+                            
+                            // System.out.println(vi_lQ + "  |  " + vj_lQ);
+                            
+                            // a real self-intersection is happening
+                            selfIntersection = true;
+                            break loop;
+                        }
                     }
                 }
                 
-                if (intersection) break;
             }
-            if (intersection) break;
         }
         
-        if (!intersection) return null;
+        if (!selfIntersection) return null;
         
         Point3d center = new Point3d();
         
         int nPoints = j - i;
-        Polygon2D c1 = new Polygon2D(this.owner, contour_resolution, new SlidingWindow(this.convergence.size));
+        Polygon2D child1 = new Polygon2D(this.owner, resolution, new SlidingWindow(this.convergence.getSize()));
         for (int p = 0; p < nPoints; p++)
         {
             Point3d pp = points.get(p + i);
             center.add(pp);
-            c1.addPoint(pp);
+            child1.addPoint(pp);
         }
         center.scale(1.0 / nPoints);
-        c1.setX(center.x);
-        c1.setY(center.y);
-        c1.setZ(center.z);
-        c1.setT(getT());
+        child1.setX(center.x);
+        child1.setY(center.y);
+        child1.setZ(center.z);
+        child1.setT(getT());
         
         center.set(0, 0, 0);
         
         nPoints = i + n - j;
-        Polygon2D c2 = new Polygon2D(this.owner, contour_resolution, new SlidingWindow(this.convergence.size));
+        Polygon2D child2 = new Polygon2D(this.owner, resolution, new SlidingWindow(this.convergence.getSize()));
         for (int p = 0, pj = p + j; p < nPoints; p++, pj++)
         {
-            Point3d pp = points.get(pj < n ? pj : pj - n);
+            Point3d pp = points.get(pj % n);
             center.add(pp);
-            c2.addPoint(pp);
+            child2.addPoint(pp);
         }
         center.scale(1.0 / nPoints);
-        c2.setX(center.x);
-        c2.setY(center.y);
-        c2.setZ(center.z);
-        c2.setT(getT());
+        child2.setX(center.x);
+        child2.setY(center.y);
+        child2.setZ(center.z);
+        child2.setT(getT());
         
         // determine whether the intersection is a loop or a division
         // rationale: check the normal of the two colliding points (i & j)
@@ -383,87 +398,156 @@ public class Polygon2D extends ActiveContour
         {
             // division => keep c1 and c2 if their size is ok
             
-            double c1area = c1.getDimension(2), c2area = c2.getDimension(2);
+            double c1area = child1.getDimension(2), c2area = child2.getDimension(2);
             
             // if only one of the two children has a size lower than minArea, then the division
             // should be considered as an artifact loop, the other child thus is the new contour
             
-            if (c1area < c2area / 10)
+            if (child1.points.size() < 10 || c1area < c2area / 5)
             {
                 // remove c1 (too small)
                 points.clear();
-                points.addAll(c2.points);
+                points.addAll(child2.points);
                 return null;
             }
             
-            if (c2area < c1area / 10)
+            if (child2.points.size() < 10 || c2area < c1area / 5)
             {
                 // remove c2 (too small)
                 points.clear();
-                points.addAll(c1.points);
+                points.addAll(child1.points);
                 return null;
             }
             
             // keep both then...
-            return new Polygon2D[] { c1, c2 };
+            return new Polygon2D[] { child1, child2 };
         }
         else
         {
             // loop => keep only the contour with correct orientation
             // => the contour with a positive algebraic area
             
-            if (c1.getAlgebraicInterior() < 0)
+            if (child1.getAlgebraicInterior() < 0)
             {
                 // c1 is the outer loop => keep it
                 points.clear();
-                points.addAll(c1.points);
+                points.addAll(child1.points);
                 return null;
             }
             else
             {
                 // c1 is the inner loop => keep c2
                 points.clear();
-                points.addAll(c2.points);
+                points.addAll(child2.points);
                 return null;
             }
         }
     }
     
     @Override
+    public Polygon2D clone()
+    {
+        return new Polygon2D(this);
+    }
+    
+    @Override
     public double computeAverageIntensity(Sequence imageData_float, int channel, Sequence buffer_data)
     {
-        IcyBufferedImage data = imageData_float.getImage(0, 0);
-        float[] _data = data.getDataXYAsFloat(channel);
-        byte[] _mask = buffer_data.getDataXYAsByte(0, 0, 0);
+        // if (!imageData_float.getBounds2D().contains(path.getBounds())) return 0.0;
         
-        int sizeX = data.getWidth();
-        int sizeY = data.getHeight();
+        int myZ = (int) Math.round(getZ());
+        float[] _data = imageData_float.getDataXYAsFloat(myZ, 0, channel);
+        short[] _mask = buffer_data == null ? null : buffer_data.getDataXYAsShort(0, myZ, 0);
+        
+        int sizeX = imageData_float.getWidth();
+        int sizeY = imageData_float.getHeight();
         
         // compute the interior mean intensity
         double inSum = 0, inCpt = 0;
-        Rectangle bounds = path.getBounds();
+        double outSum = 0, outCpt = 0;
+        Point3d minBounds = new Point3d();
+        Point3d maxBounds = new Point3d();
+        boundingBox.getLower(minBounds);
+        boundingBox.getUpper(maxBounds);
         
-        int minX = Math.max(bounds.x - bounds.width, 0);
-        int maxX = Math.min(bounds.x + bounds.width * 2, sizeX);
-        int minY = Math.max(bounds.y - bounds.height, 0);
-        int maxY = Math.min(bounds.y + bounds.height * 2, sizeY);
+        int minX = Math.max((int) minBounds.x - 10, -1);
+        int maxX = Math.min((int) maxBounds.x + 10, sizeX);
+        int minY = Math.max((int) minBounds.y - 10, 0);
+        int maxY = Math.min((int) maxBounds.y + 10, sizeY);
+        
+        int n = points.size();
+        Point3d p1 = null, p2 = null;
+        TreeSet<Integer> crosses = new TreeSet<Integer>();
         
         for (int j = minY; j < maxY; j++)
         {
             int offset = j * sizeX + minX;
             
-            for (int i = minX; i < maxX; i++, offset++)
+            crosses.clear();
+            crosses.add(minX);
+            
+            for (int p = 0; p < n - 1; p++)
             {
-                if (bounds.contains(i, j) && path.contains(i, j))
+                p1 = points.get(p);
+                p2 = points.get(p + 1);
+                
+                if (j > Math.min(p1.y, p2.y) && j < Math.max(p1.y, p2.y)) crosses.add((int) Math.round((p1.x + p2.x) * 0.5));
+            }
+            p1 = points.get(0);
+            
+            if (j > Math.min(p1.y, p2.y) && j < Math.max(p1.y, p2.y)) crosses.add((int) Math.round((p1.x + p2.x) * 0.5));
+            
+            crosses.add(maxX);
+            
+            int nC = crosses.size();
+            
+            if (nC == 2)
+            {
+                // for (int i = minX + 1; i < maxX - 1; i++, offset++)
+                // {
+                // outSum += _data[offset];
+                // outCpt++;
+                // }
+            }
+            else
+            {
+                boolean in = false;
+                
+                Iterator<Integer> it = crosses.iterator();
+                int start = it.next();
+                if (start < 0) start = 0;
+                
+                while (it.hasNext())
                 {
-                    _mask[offset] = 1;
-                    double value = _data[offset];
-                    inSum += value;
-                    inCpt++;
+                    int end = it.next();
+                    if (end > sizeX) end = sizeX;
+                    
+                    if (in)
+                    {
+                        for (int i = start; i < end; i++, offset++)
+                        {
+                            if (offset < 0 || offset >= _data.length) continue;
+                            _mask[offset] = 1;
+                            inSum += _data[offset];
+                            inCpt++;
+                        }
+                    }
+                    else
+                    {
+                        // for (int i = start; i < end; i++, offset++)
+                        // {
+                        // outSum += _data[offset];
+                        // outCpt++;
+                        // }
+                        offset += end - start + 1;
+                    }
+                    
+                    start = end;
+                    in = !in;
                 }
             }
         }
-        
+        // cout = outSum / outCpt;
         return inSum / inCpt;
     }
     
@@ -512,8 +596,6 @@ public class Polygon2D extends ActiveContour
         // To drive the contour along the main object axis, each displacement
         // vector is scaled by the scalar product between its normal and the main axis.
         {
-            updateNormalsIfNeeded();
-            
             for (int i = 0; i < s; i++)
             {
                 Vector3d normal = contourNormals[i];
@@ -533,7 +615,6 @@ public class Polygon2D extends ActiveContour
     void computeBalloonForces(double weight)
     {
         int n = points.size();
-        updateNormalsIfNeeded();
         
         for (int i = 0; i < n; i++)
         {
@@ -554,7 +635,6 @@ public class Polygon2D extends ActiveContour
     void computeEdgeForces(Sequence edgeData, int channel, double weight)
     {
         int n = points.size();
-        updateNormalsIfNeeded();
         
         Vector3d grad = new Vector3d();
         
@@ -569,9 +649,13 @@ public class Polygon2D extends ActiveContour
             
             // compute the gradient (2nd order)
             double nextX = getPixelValue(data, width, height, p.x + 0.5, p.y);
+            if (nextX == 0) continue;
             double prevX = getPixelValue(data, width, height, p.x - 0.5, p.y);
+            if (prevX == 0) continue;
             double nextY = getPixelValue(data, width, height, p.x, p.y + 0.5);
+            if (nextY == 0) continue;
             double prevY = getPixelValue(data, width, height, p.x, p.y - 0.5);
+            if (prevY == 0) continue;
             grad.set(nextX - prevX, nextY - prevY, 0.0);
             
             grad.scale(weight);
@@ -589,11 +673,9 @@ public class Polygon2D extends ActiveContour
         // sensitivity = sensitivity * cin / (0.01 + cout);
         // sensitivity = sensitivity / (2 * Math.max(cout, cin));
         // sensitivity = sensitivity / (Math.log10(cin / cout));
-        
-        updateNormalsIfNeeded();
-        
+
         Point3d p;
-        Vector3d f, norm, cvms = new Vector3d();;
+        Vector3d f, norm, cvms = new Vector3d();
         double val, inDiff, outDiff, sum;
         int n = points.size();
         
@@ -608,7 +690,7 @@ public class Polygon2D extends ActiveContour
             norm = contourNormals[i];
             
             // bounds check
-            if (p.x < 1 || p.y < 1 || p.x >= width - 1 || p.y >= height - 1) continue;
+            // if (p.x <= 1 || p.y <= 1 || p.x >= width - 2 || p.y >= height - 2) continue;
             
             val = getPixelValue(data, width, height, p.x, p.y);
             
@@ -618,9 +700,11 @@ public class Polygon2D extends ActiveContour
             outDiff = val - cout;
             outDiff *= outDiff;
             
-            sum = weight * contour_resolution.getValue() * (sensitivity * outDiff) - (inDiff / sensitivity);
+            sum = weight * resolution.getValue() * (sensitivity * outDiff) - (inDiff / sensitivity);
             
             cvms.scale(counterClockWise ? -sum : sum, norm);
+            
+            // if (cvms.dot(norm) < 0) cvms.scale(1.25);
             
             f.add(cvms);
         }
@@ -639,7 +723,7 @@ public class Polygon2D extends ActiveContour
         Vector3d f;
         Point3d prev, curr, next;
         
-        weight /= contour_resolution.getValue();
+        weight /= resolution.getValue();
         
         // first point
         prev = points.get(n - 1);
@@ -650,8 +734,6 @@ public class Polygon2D extends ActiveContour
         
         f.x += weight * (prev.x - 2 * curr.x + next.x);
         f.y += weight * (prev.y - 2 * curr.y + next.y);
-        // f.x -= 0.5*weight * (next.x - curr.x);
-        // f.y -= 0.5*weight * (next.y - curr.y);
         
         // middle points
         for (int i = 1; i < n - 1; i++)
@@ -663,8 +745,6 @@ public class Polygon2D extends ActiveContour
             
             f.x += weight * (prev.x - 2 * curr.x + next.x);
             f.y += weight * (prev.y - 2 * curr.y + next.y);
-            // f.x -= 0.5*weight * (next.x - curr.x);
-            // f.y -= 0.5*weight * (next.y - curr.y);
         }
         
         // last point
@@ -675,8 +755,6 @@ public class Polygon2D extends ActiveContour
         
         f.x += weight * (prev.x - 2 * curr.x + next.x);
         f.y += weight * (prev.y - 2 * curr.y + next.y);
-        // f.x -= 0.5*weight * (next.x - curr.x);
-        // f.y -= 0.5*weight * (next.y - curr.y);
     }
     
     void computeVolumeConstraint(double targetVolume)
@@ -687,7 +765,6 @@ public class Polygon2D extends ActiveContour
         // if (volumeDiff < 0): contour too big, should no longer grow
         
         int n = points.size();
-        updateNormalsIfNeeded();
         
         for (int i = 0; i < n; i++)
         {
@@ -705,7 +782,7 @@ public class Polygon2D extends ActiveContour
                 // or
                 // - contour too large (volumeDiff < 0) and growing (forceNorm > 0)
                 // => in both cases, constrain the final force accordingly
-                mf.scale(1.0 / (1.0 + Math.abs(volumeDiff)));
+                mf.scale(1.0 / (1.0 + Math.abs(volumeDiff) / 10));
             }
         }
     }
@@ -721,32 +798,32 @@ public class Polygon2D extends ActiveContour
     @Override
     int computeFeedbackForces(ActiveContour target)
     {
-        updateNormalsIfNeeded();
-        
-        BoundingSphere targetSphere = target.getBoundingSphere();
         Point3d targetCenter = new Point3d();
-        targetSphere.getCenter(targetCenter);
-        double targetRadius = targetSphere.getRadius();
+        target.boundingSphere.getCenter(targetCenter);
+        
+        double targetRadiusSq = target.boundingSphere.getRadius();
+        targetRadiusSq *= targetRadiusSq;
         
         double penetration = 0;
         
         int tests = 0;
-        
         int index = 0;
+        
         for (Point3d p : points)
         {
-            Vector3d feedbackForce = feedbackForces[index];
+            double distanceSq = p.distanceSquared(targetCenter);
             
-            double distance = p.distance(targetCenter);
-            
-            if (distance < targetRadius)
+            if (distanceSq < targetRadiusSq)
             {
                 tests++;
                 
                 if ((penetration = target.contains(p)) > 0)
                 {
+                    Vector3d feedbackForce = feedbackForces[index];
+                    
                     // feedbackForce.scale(-penetration, contourNormals[index]);
-                    feedbackForce.scaleAdd(-penetration / 2, contourNormals[index], feedbackForce);
+                    feedbackForce.scaleAdd(-penetration * 0.5, contourNormals[index], feedbackForce);
+                    
                     modelForces[index].scale(0.05);
                 }
             }
@@ -754,6 +831,88 @@ public class Polygon2D extends ActiveContour
         }
         
         return tests;
+    }
+    
+    private static void createEdge(ArrayList<Segment> segments, double xStart, double yStart, double xEnd, double yEnd)
+    {
+        double EPSILON = 0.00001;
+        
+        Point3d head = new Point3d(xStart, yStart, 0);
+        Point3d tail = new Point3d(xEnd, yEnd, 0);
+        
+        if (segments.size() == 0)
+        {
+            segments.add(new Segment(head, tail));
+            return;
+        }
+        
+        int insertAtTailOf = -1, insertAtHeadOf = -1;
+        
+        for (int i = 0; i < segments.size(); i++)
+        {
+            if (tail.distance(segments.get(i).getHead()) <= EPSILON)
+                insertAtHeadOf = i;
+            else if (head.distance(segments.get(i).getTail()) <= EPSILON) insertAtTailOf = i;
+        }
+        
+        if (insertAtTailOf >= 0)
+        {
+            if (insertAtHeadOf >= 0)
+            {
+                segments.get(insertAtHeadOf).addHead(segments.get(insertAtTailOf));
+                segments.remove(insertAtTailOf);
+            }
+            else
+            {
+                segments.get(insertAtTailOf).addTail(tail);
+            }
+        }
+        else if (insertAtHeadOf >= 0)
+        {
+            segments.get(insertAtHeadOf).addHead(head);
+        }
+        else
+        {
+            segments.add(new Segment(head, tail));
+        }
+    }
+    
+    /**
+     * Perform a morphological dilation on the specified ROI by the given radius in each dimension
+     * 
+     * @param roi
+     *            the ROI to dilate
+     * @param xRadius
+     *            the radius in pixels along X
+     * @param yRadius
+     *            the radius in pixels along X
+     * @param zRadius
+     *            the radius in pixels along Z (not used if <code>roi</code> is 2D)
+     * @return a new, dilated ROI of type "area"
+     */
+    private static ROI2D dilateROI(ROI2D roi, int xRadius, int yRadius)
+    {
+        int rx = xRadius, rrx = rx * rx;
+        int ry = yRadius, rry = ry * ry;
+        
+        BooleanMask2D m2 = roi.getBooleanMask(true);
+        ROI2DArea r2 = new ROI2DArea(m2);
+        
+        r2.beginUpdate();
+        
+        for (Point p : m2.getContourPoints())
+        {
+            // Brute force
+            for (int y = -ry; y <= ry; y++)
+                for (int x = -rx; x <= rx; x++)
+                    if (x * x / rrx + y * y / rry <= 1.0)
+                    {
+                        if (!m2.contains(p.x + x, p.y + y)) r2.addPoint(p.x + x, p.y + y);
+                    }
+        }
+        r2.endUpdate();
+        
+        return r2;
     }
     
     /**
@@ -769,10 +928,14 @@ public class Polygon2D extends ActiveContour
      */
     private float getPixelValue(float[] data, int width, int height, double x, double y)
     {
-        final int i = (int) Math.round(x);
-        final int j = (int) Math.round(y);
+        int i = (int) Math.round(x);
+        int j = (int) Math.round(y);
         
-        if (i < 0 || i >= width - 1 || j < 0 || j >= height - 1) return 0f;
+        // if (i <= 0 || i >= width - 1 || j <= 0 || j >= height - 1) return 0f;
+        if (i < 0) i = 0;
+        if (j < 0) j = 0;
+        if (i > width - 2) i = width - 2;
+        if (j > height - 2) j = height - 2;
         
         float value = 0;
         
@@ -946,21 +1109,27 @@ public class Polygon2D extends ActiveContour
     void move(ROI field, double timeStep)
     {
         Vector3d force = new Vector3d();
-        double maxDisp = contour_resolution.getValue() * timeStep;
+        double maxDisp = resolution.getValue() * timeStep;
         
         int n = points.size();
         
         if (modelForces == null || modelForces.length != n) return;
-        
-        double x = 0;
-        double y = 0;
         
         for (int index = 0; index < n; index++)
         {
             Point3d p = points.get(index);
             
             // apply model forces if p lies within the area of interest
-            if (field != null && field.contains(p.x, p.y, 0, 0, 0) && modelForces[index] != null) force.set(modelForces[index]);
+            if (field != null && field.contains(p.x, p.y, 0, 0, 0) && modelForces[index] != null)
+            {
+                if (p.x < 1 || p.x > field.getBounds5D().getSizeX() - 2) modelForces[index].scale(0.1);
+                if (p.y < 1 || p.y > field.getBounds5D().getSizeY() - 2) modelForces[index].scale(0.1);
+                force.set(modelForces[index]);
+            }
+            else
+            {
+                feedbackForces[index].scale(0.25);
+            }
             
             // apply feedback forces all the time
             force.add(feedbackForces[index]);
@@ -973,26 +1142,19 @@ public class Polygon2D extends ActiveContour
             
             p.add(force);
             
-            x += p.x;
-            y += p.y;
-            
             force.set(0, 0, 0);
             
             modelForces[index].set(0, 0, 0);
             feedbackForces[index].set(0, 0, 0);
         }
         
-        setX(x / n);
-        setY(y / n);
-        
-        normalsNeedUpdate = true;
-        boundingSphereNeedsUpdate = true;
+        updateMetaData();
         
         // compute some convergence criterion
         
         if (convergence == null) return;
         
-        convergence.add(getDimension(2));
+        convergence.push(getDimension(2));
         
     }
     
@@ -1001,24 +1163,40 @@ public class Polygon2D extends ActiveContour
     @Override
     public void paint(Graphics2D g, Sequence sequence, IcyCanvas canvas)
     {
-        if (getT() != canvas.getPositionT() || !enabled || g == null) return;
+        // only paint detections on the current frame
+        if (getT() != canvas.getPositionT()) return;
         
-        float fontSize = (float) canvas.canvasToImageLogDeltaX(30);
-        g.setFont(new Font("Trebuchet MS", Font.BOLD, 10).deriveFont(fontSize));
-        
-        double stroke = Math.max(canvas.canvasToImageLogDeltaX(3), canvas.canvasToImageLogDeltaY(3));
-        
-        g.setStroke(new BasicStroke((float) stroke, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-        
-        g.setColor(getColor());
-        
-        synchronized (path)
+        if (g != null)
         {
-            g.draw(path);
+            // 2D viewer
+            Rectangle2D viewBounds = ((IcyCanvas2D) canvas).canvasToImage(canvas.getBounds());
+            g.clip(viewBounds);
+            
+            float fontSize = (float) canvas.canvasToImageLogDeltaX(30);
+            g.setFont(new Font("Trebuchet MS", Font.BOLD, 10).deriveFont(fontSize));
+            
+            double stroke = Math.max(canvas.canvasToImageLogDeltaX(3), canvas.canvasToImageLogDeltaY(3));
+            
+            g.setColor(getColor());
+            
+            g.setStroke(new BasicStroke((float) stroke, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            
+            g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_SPEED);
+            
+            synchronized (path)
+            {
+                g.draw(path);
+            }
+            // this line displays the average intensity inside the object
+            // g.drawString(StringUtil.toString(cin, 2), (float) getX() + 3, (float) getY());
         }
-        // this line displays the average intensity inside the object
-        // g.drawString(StringUtil.toString(cin, 2), (float) getX() + 3, (float) getY());
+        else
+        {
+            // TODO other viewers
+        }
     }
+    
+    int cpt = 0;
     
     /**
      * Re-samples the Contour according to an 'average distance between points' criterion. This
@@ -1034,10 +1212,10 @@ public class Polygon2D extends ActiveContour
     @Override
     public void reSample(double minFactor, double maxFactor) throws TopologyException
     {
-        if (getDimension(0) < 4) throw new TopologyException(this, new Polygon2D[] {});
+        if (getDimension(0) < 15) throw new TopologyException(this, new Polygon2D[] {});
         
-        double minLength = contour_resolution.getValue() * minFactor;
-        double maxLength = contour_resolution.getValue() * maxFactor;
+        double minLength = resolution.getValue() * minFactor;
+        double maxLength = resolution.getValue() * maxFactor;
         
         // optimization to avoid multiple points.size() calls (WARNING: n must
         // be updated manually whenever points is changed)
@@ -1049,11 +1227,12 @@ public class Polygon2D extends ActiveContour
             contourNormals = new Vector3d[n];
             for (int i = 0; i < n; i++)
                 contourNormals[i] = new Vector3d();
-            normalsNeedUpdate = true;
-            updateNormalsIfNeeded();
+            
+            updateNormals();
         }
         
-        Polygon2D[] children = checkSelfIntersection(contour_resolution.getValue());
+        Polygon2D[] children = cpt % 2 == 0 ? null : checkSelfIntersection(resolution.getValue());
+        cpt++;
         
         if (children != null) throw new TopologyException(this, children);
         
@@ -1129,10 +1308,7 @@ public class Polygon2D extends ActiveContour
             }
         }
         
-        updatePath();
-        
-        normalsNeedUpdate = true;
-        boundingSphereNeedsUpdate = true;
+        updateMetaData();
     }
     
     private void triangulate(ROI2DArea roi, double resolution) throws TopologyException
@@ -1302,10 +1478,8 @@ public class Polygon2D extends ActiveContour
         reSample(0.8, 1.4);
     }
     
-    protected void updateNormalsIfNeeded()
+    protected void updateNormals()
     {
-        if (!normalsNeedUpdate) return;
-        
         int n = points.size();
         
         // first point
@@ -1329,13 +1503,19 @@ public class Polygon2D extends ActiveContour
             Point3d p2 = points.get(0);
             contourNormals[n - 1].normalize(new Vector3d(p2.y - p1.y, p1.x - p2.x, 0));
         }
-        
-        normalsNeedUpdate = false;
+    }
+    
+    @Override
+    protected void updateMetaData()
+    {
+        super.updateMetaData();
+        updatePath();
     }
     
     private void updatePath()
     {
-        double x, y;
+        if (Icy.isHeadLess()) return;
+        
         synchronized (path)
         {
             path.reset();
@@ -1344,23 +1524,14 @@ public class Polygon2D extends ActiveContour
             
             Point3d p = points.get(0);
             path.moveTo(p.x, p.y);
-            x = p.x;
-            y = p.y;
             
             for (int i = 1; i < nbPoints; i++)
             {
                 p = points.get(i);
                 path.lineTo(p.x, p.y);
-                x += p.x;
-                y += p.y;
-                // TODO
-                // Point3d pp = points.get(i-1);
-                // path.quadTo((pp.x + p.x)/2, (pp.y + p.y)/2, p.x, p.y);
             }
-            path.closePath();
             
-            setX(x / nbPoints);
-            setY(y / nbPoints);
+            path.closePath();
         }
     }
     
@@ -1386,7 +1557,7 @@ public class Polygon2D extends ActiveContour
             List<Point2D> p2d = new ArrayList<Point2D>(points.size());
             for (Point3d p : this)
                 p2d.add(new Point2D.Double(p.x, p.y));
-            roi = new ROI2DPolygon(p2d);            
+            roi = new ROI2DPolygon(p2d);
             break;
         
         default:
@@ -1395,5 +1566,110 @@ public class Polygon2D extends ActiveContour
         
         roi.setT(t);
         return roi;
+    }
+    
+    @Override
+    public void toSequence(Sequence output, double value)
+    {
+        int myZ = (int) Math.round(getZ());
+        int myT = (int) Math.round(getT());
+        
+        Object _mask = output.getDataXY(myT, myZ, 0);
+        
+        int sizeX = output.getWidth();
+        int sizeY = output.getHeight();
+        
+        // compute the interior mean intensity
+        Point3d minBounds = new Point3d();
+        Point3d maxBounds = new Point3d();
+        boundingBox.getLower(minBounds);
+        boundingBox.getUpper(maxBounds);
+        
+        int minX = Math.max((int) minBounds.x - 2, -10);
+        int maxX = Math.min((int) maxBounds.x + 2, sizeX + 10);
+        int minY = Math.max((int) minBounds.y - 1, 0);
+        int maxY = Math.min((int) maxBounds.y + 1, sizeY);
+        
+        int n = points.size();
+        Point3d p1 = null, p2 = null;
+        TreeSet<Integer> crosses = new TreeSet<Integer>();
+        
+        for (int j = minY; j < maxY; j++)
+        {
+            int lineOffset = j * sizeX;
+            int offset = lineOffset + (minX < 0 ? 0 : minX);
+            
+            crosses.clear();
+            crosses.add(minX);
+            
+            for (int p = 0; p < n - 1; p++)
+            {
+                p1 = points.get(p);
+                p2 = points.get(p + 1);
+                
+                if (j >= Math.min(p1.y, p2.y) && j <= Math.max(p1.y, p2.y))
+                {
+                    // crosses.add((int) Math.round((p1.x + p2.x) * 0.5));
+                    int cross = (int) Math.round(p1.x + ((j - p1.y) * (p2.x - p1.x) / (p2.y - p1.y)));
+                    if (crosses.contains(cross))
+                    {
+                        crosses.remove(cross);
+                        Array1DUtil.setValue(_mask, lineOffset + cross, value);
+                    }
+                    else
+                    {
+                        crosses.add(cross);
+                    }
+                }
+            }
+            p1 = points.get(0);
+            
+            if (j >= Math.min(p1.y, p2.y) && j <= Math.max(p1.y, p2.y))
+            {
+                // crosses.add((int) Math.round((p1.x + p2.x) * 0.5));
+                int cross = (int) Math.round(p1.x + ((j - p1.y) * (p2.x - p1.x) / (p2.y - p1.y)));
+                if (crosses.contains(cross))
+                {
+                    crosses.remove(cross);
+                    Array1DUtil.setValue(_mask, lineOffset + cross, value);
+                }
+                else
+                {
+                    crosses.add(cross);
+                }
+            }
+            
+            crosses.add(maxX);
+            
+            int nC = crosses.size();
+            
+            if (nC > 2)
+            {
+                boolean in = false;
+                
+                Iterator<Integer> it = crosses.iterator();
+                int start = it.next();
+                if (start < 0) start = 0;
+                
+                while (it.hasNext())
+                {
+                    int end = it.next();
+                    if (end > sizeX) end = sizeX;
+                    
+                    if (in)
+                    {
+                        for (int i = start; i < end; i++, offset++)
+                        {
+                            //if (start < 0 || end >= sizeY) continue;
+                            Array1DUtil.setValue(_mask, offset, value);
+                        }
+                    }
+                    else offset += end - start;
+                    
+                    start = end;
+                    in = !in;
+                }
+            }
+        }
     }
 }
