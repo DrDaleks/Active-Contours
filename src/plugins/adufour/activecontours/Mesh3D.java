@@ -1,6 +1,5 @@
 package plugins.adufour.activecontours;
 
-import icy.canvas.Canvas3D;
 import icy.canvas.IcyCanvas;
 import icy.roi.ROI;
 import icy.roi.ROI3D;
@@ -8,7 +7,6 @@ import icy.sequence.Sequence;
 import icy.system.SystemUtil;
 import icy.type.DataType;
 import icy.type.collection.array.Array1DUtil;
-import icy.type.point.Point3D;
 import icy.type.rectangle.Rectangle3D;
 import icy.vtk.VtkUtil;
 
@@ -32,7 +30,7 @@ import javax.vecmath.Vector3d;
 
 import plugins.adufour.activecontours.ActiveContours.ROIType;
 import plugins.adufour.ezplug.EzVarDouble;
-import plugins.adufour.quickhull.QuickHull3D;
+import plugins.kernel.canvas.VtkCanvas;
 import vtk.vtkActor;
 import vtk.vtkDoubleArray;
 import vtk.vtkPoints;
@@ -42,8 +40,6 @@ import vtk.vtkRenderer;
 
 public class Mesh3D extends ActiveContour
 {
-    static final ExecutorService threadPool = Executors.newFixedThreadPool(SystemUtil.getAvailableProcessors());
-    
     /**
      * Structural element of triangular mesh
      * 
@@ -191,8 +187,6 @@ public class Mesh3D extends ActiveContour
         }
     }
     
-    final ArrayList<Face> faces = new ArrayList<Face>();
-    
     /**
      * Structural element of triangular mesh
      * 
@@ -258,7 +252,13 @@ public class Mesh3D extends ActiveContour
         }
     }
     
-    final ArrayList<Vertex> vertices = new ArrayList<Vertex>();
+    static final ExecutorService    threadPool = Executors.newFixedThreadPool(SystemUtil.getAvailableProcessors());
+    
+    final ArrayList<Face>           faces      = new ArrayList<Face>();
+    
+    private final ArrayList<Vertex> vertices   = new ArrayList<Vertex>();
+    
+    private VTKMesh                 vtkMesh    = null;
     
     protected Mesh3D(ActiveContours owner, EzVarDouble contour_resolution, SlidingWindow convergenceWindow)
     {
@@ -350,14 +350,14 @@ public class Mesh3D extends ActiveContour
             addFace(yC, xC, zC);
             
             Rectangle3D r3 = roi.computeBounds3D();
-            for(Point3d pt : this)
+            for (Point3d pt : this)
             {
-                pt.x += r3.getCenterX() * xyRes;
-                pt.y += r3.getCenterY() * xyRes;
-                pt.z += r3.getCenterZ() * zRes;
+                pt.x = pt.x * (r3.getSizeX() * xyRes / 4) + (r3.getMinX() + r3.getSizeX() / 2) * xyRes;
+                pt.y = pt.y * (r3.getSizeY() * xyRes / 4) + (r3.getMinY() + r3.getSizeY() / 2) * xyRes;
+                pt.z = pt.z * (r3.getSizeZ() * zRes / 4) + (r3.getMinZ() + r3.getSizeZ() / 2) * zRes;
             }
             
-//            reSample(0.6, 1.4);
+            // reSample(0.6, 1.4);
             
             updateMetaData();
         }
@@ -542,6 +542,15 @@ public class Mesh3D extends ActiveContour
                 targetFacesList.add(f);
                 sourceFacesList.remove(i--);
             }
+        }
+    }
+    
+    @Override
+    protected void clean()
+    {
+        if (vtkMesh != null)
+        {
+            vtkMesh.clean();
         }
     }
     
@@ -1292,8 +1301,6 @@ public class Mesh3D extends ActiveContour
         
     }
     
-    VTKMesh mesh = null;
-    
     @Override
     public void paint(Graphics2D g, Sequence sequence, IcyCanvas canvas)
     {
@@ -1313,19 +1320,28 @@ public class Mesh3D extends ActiveContour
             
             g.setColor(getColor());
             
-            g.drawString("[3D mesh]", (float) x, (float) y);
+            // g.drawString("[3D mesh]", (float) x, (float) y);
             
             // TODO draw something more in 2D (points? raster mesh?)
+            
+            Point3d upper = new Point3d(), lower = new Point3d();
+            boundingBox.getUpper(upper);
+            boundingBox.getLower(lower);
+            int x = (int) (lower.x / sequence.getPixelSizeX());
+            int y = (int) (lower.y / sequence.getPixelSizeY());
+            int w = (int) ((1 + upper.x - lower.x) / sequence.getPixelSizeX());
+            int h = (int) ((1 + upper.y - lower.y) / sequence.getPixelSizeY());
+            g.drawRect(x, y, w, h);
         }
-        else if (canvas instanceof Canvas3D)
+        else if (canvas instanceof VtkCanvas)
         {
             // 3D viewer
             
-            if (mesh == null)
+            if (vtkMesh == null)
             {
-                mesh = new VTKMesh();
-                mesh.update();
-                ((Canvas3D) canvas).getRenderer().AddActor(mesh.actor);
+                vtkMesh = new VTKMesh(((VtkCanvas) canvas).getRenderer());
+                vtkMesh.update();
+                vtkMesh.renderer.AddActor(vtkMesh.actor);
             }
         }
         else
@@ -1603,7 +1619,7 @@ public class Mesh3D extends ActiveContour
     {
         super.updateMetaData();
         
-        if (mesh != null) mesh.update();
+        if (vtkMesh != null) vtkMesh.update();
     }
     
     /**
@@ -1805,17 +1821,19 @@ public class Mesh3D extends ActiveContour
         public final vtkPolyData        polyData          = new vtkPolyData();
         private final vtkPolyDataMapper polyDataMapper    = new vtkPolyDataMapper();
         public final vtkActor           actor             = new vtkActor();
-        private vtkRenderer             renderer;
+        private final vtkRenderer       renderer;
         
-        VTKMesh()
+        VTKMesh(vtkRenderer renderer)
         {
             this.vtkVerticesCoords.SetNumberOfComponents(3);
             this.vtkVerticesInfo.SetData(this.vtkVerticesCoords);
             this.polyData.SetPoints(this.vtkVerticesInfo);
             
-            this.polyDataMapper.SetInput(this.polyData);
+            this.polyDataMapper.SetInputData(this.polyData);
             
             this.actor.SetMapper(this.polyDataMapper);
+            
+            this.renderer = renderer;
         }
         
         public void update()

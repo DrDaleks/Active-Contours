@@ -445,6 +445,12 @@ public class Polygon2D extends ActiveContour
     }
     
     @Override
+    protected void clean()
+    {
+        // nothing to clean (everything should be garbage-collected)
+    }
+    
+    @Override
     public Polygon2D clone()
     {
         return new Polygon2D(this);
@@ -464,7 +470,7 @@ public class Polygon2D extends ActiveContour
         
         // compute the interior mean intensity
         double inSum = 0, inCpt = 0;
-        double outSum = 0, outCpt = 0;
+        //double outSum = 0, outCpt = 0;
         Point3d minBounds = new Point3d();
         Point3d maxBounds = new Point3d();
         boundingBox.getLower(minBounds);
@@ -1514,7 +1520,7 @@ public class Polygon2D extends ActiveContour
     
     private void updatePath()
     {
-        if (Icy.isHeadLess()) return;
+        if (Icy.getMainInterface().isHeadLess()) return;
         
         synchronized (path)
         {

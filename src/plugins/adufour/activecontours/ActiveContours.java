@@ -272,11 +272,11 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         trackGroup = new TrackGroup(inputData);
         trackGroup.setDescription("Active contours (" + new Date().toString() + ")");
         
-        if (!Icy.isHeadLess())
+        if (!Icy.getMainInterface().isHeadLess())
         {
             // replace any ActiveContours Painter object on the sequence by ours
             for (Overlay overlay : inputData.getOverlays())
-                if (overlay instanceof ActiveContoursOverlay) inputData.removeOverlay(overlay);
+                if (overlay instanceof ActiveContoursOverlay) overlay.remove();
             
             overlay = new ActiveContoursOverlay(trackGroup);
             overlay.setPriority(OverlayPriority.TOPMOST);
@@ -808,13 +808,13 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             if (getUI() != null)
             {
                 getUI().setProgressBarValue((double) nbConvergedContours / allContours.size());
-                getUI().setProgressBarMessage("" + iter);
+                // getUI().setProgressBarMessage("" + iter); // slows down the AWT !!
             }
             
             if (evolvingContours.size() == 0) break;
             
             // re-sample the contours to ensure homogeneous resolution
-            resampleContours(evolvingContours, allContours, t);
+            // resampleContours(evolvingContours, allContours, t);
             
             // update region information every 10 iterations
             
@@ -830,7 +830,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             
             if (Thread.currentThread().isInterrupted()) globalStop = true;
             
-            if (!Icy.isHeadLess() && iter % 10 == 0) overlay.painterChanged();
+            if (!Icy.getMainInterface().isHeadLess() && iter % 10 == 0) overlay.painterChanged();
             
             iter++;
             

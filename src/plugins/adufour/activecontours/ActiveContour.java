@@ -291,6 +291,12 @@ public abstract class ActiveContour extends Detection implements Iterable<Point3
         
         updateNormals();
     }
-
+    
     protected abstract void updateNormals();
+    
+    /**
+     * Optional method to clean intermediate resources before destroying the contours (e.g. VTK
+     * overlays)
+     */
+    protected abstract void clean();
 }

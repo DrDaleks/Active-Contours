@@ -11,6 +11,7 @@ import java.util.HashMap;
 
 import plugins.fab.trackmanager.TrackGroup;
 import plugins.fab.trackmanager.TrackSegment;
+import plugins.nchenouard.spot.Detection;
 
 public class ActiveContoursOverlay extends Overlay
 {
@@ -74,5 +75,44 @@ public class ActiveContoursOverlay extends Overlay
                 }
             }
         }
+    }
+    
+    @Override
+    public void remove()
+    {
+        if (trackGroup == null)
+        {
+            for (ArrayList<ActiveContour> contours : contoursMap.values())
+            {
+                for (ActiveContour contour : contours)
+                {
+                    contour.clean();
+                }
+            }
+        }
+        else
+        {
+            ArrayList<TrackSegment> segments = new ArrayList<TrackSegment>(trackGroup.getTrackSegmentList());
+            
+            for (int i = 1; i <= segments.size(); i++)
+            {
+                TrackSegment segment = segments.get(i - 1);
+                
+                try
+                {
+                    for (Detection detection : segment.getDetectionList())
+                    {
+                        ((ActiveContour) detection).clean();
+                    }
+                }
+                catch (ConcurrentModificationException e)
+                {
+                    // segment has probably changed while looking for a detection to paint
+                    // => ignore and wait for the next repaint
+                }
+            }
+        }
+        
+        super.remove();
     }
 }
