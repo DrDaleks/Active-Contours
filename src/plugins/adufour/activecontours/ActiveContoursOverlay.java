@@ -7,7 +7,6 @@ import icy.sequence.Sequence;
 import java.awt.Graphics2D;
 import java.util.ArrayList;
 import java.util.ConcurrentModificationException;
-import java.util.HashMap;
 
 import plugins.fab.trackmanager.TrackGroup;
 import plugins.fab.trackmanager.TrackSegment;
@@ -15,15 +14,7 @@ import plugins.nchenouard.spot.Detection;
 
 public class ActiveContoursOverlay extends Overlay
 {
-    private HashMap<Integer, ArrayList<ActiveContour>> contoursMap;
-    
-    private TrackGroup                                 trackGroup;
-    
-    public ActiveContoursOverlay(HashMap<Integer, ArrayList<ActiveContour>> contours)
-    {
-        super("Active contours");
-        contoursMap = contours;
-    }
+    private TrackGroup trackGroup;
     
     public ActiveContoursOverlay(TrackGroup trackGroup)
     {
@@ -36,80 +27,73 @@ public class ActiveContoursOverlay extends Overlay
     {
         int t = canvas.getPositionT();
         
-        if (trackGroup == null)
+        ArrayList<TrackSegment> segments = new ArrayList<TrackSegment>(trackGroup.getTrackSegmentList());
+        
+        for (int i = 1; i <= segments.size(); i++)
         {
-            if (contoursMap.containsKey(t))
-            {
-                for (ActiveContour contour : contoursMap.get(t))
-                {
-                    contour.paint(g, sequence, canvas);
-                }
-            }
-        }
-        else
-        {
-            ArrayList<TrackSegment> segments = new ArrayList<TrackSegment>(trackGroup.getTrackSegmentList());
+            TrackSegment segment = segments.get(i - 1);
             
-            for (int i = 1; i <= segments.size(); i++)
+            if (segment == null) continue;
+            
+            // try
+            for (int d = 0; d < segment.getDetectionList().size(); d++)
             {
-                TrackSegment segment = segments.get(i - 1);
+                ActiveContour contour = (ActiveContour) segment.getDetectionList().get(d);
                 
-                try
+                if (contour == null) continue;
+                
+                contour.paint(g, sequence, canvas);
+                
+                if (g != null && contour.getT() == t)
                 {
-                    ActiveContour contour = (ActiveContour) segment.getDetectionAtTime(t);
-                    if (contour == null) continue;
+                    // in 2D, draw the contour number in its center (and mind the zoom factor)
+                    float f = (float) canvas.canvasToImageLogDeltaX(18);
                     
-                    contour.paint(g, sequence, canvas);
-                    
-                    if (g != null)
+                    float x = (float) contour.getX();
+                    float y = (float) contour.getY();
+                    if (contour instanceof Mesh3D)
                     {
-                        // in 2D, draw the contour number in its center (and mind the zoom factor)
-                        float f = (float) canvas.canvasToImageLogDeltaX(18);
-                        g.drawString("" + i, (float) contour.getX() - (i < 10 ? f / 2 : f), (float) contour.getY() + f / 2);
+                        // convert real coordinates back into pixel coordinates
+                        x /= (float) sequence.getPixelSizeX();
+                        y /= (float) sequence.getPixelSizeY();
                     }
-                }
-                catch (ConcurrentModificationException e)
-                {
-                    // segment has probably changed while looking for a detection to paint
-                    // => ignore and wait for the next repaint
+                    
+                    // adjust the text positioning
+                    x -= (i < 10 ? f / 2 : f);
+                    y += f / 2;
+                    
+                    g.drawString("" + i, x, y);
                 }
             }
+            // catch (ConcurrentModificationException e)
+            // {
+            // // segment has probably changed while looking for a detection to paint
+            // // => ignore and wait for the next repaint
+            // }
         }
+        
     }
     
     @Override
     public void remove()
     {
-        if (trackGroup == null)
+        ArrayList<TrackSegment> segments = new ArrayList<TrackSegment>(trackGroup.getTrackSegmentList());
+        
+        for (int i = 1; i <= segments.size(); i++)
         {
-            for (ArrayList<ActiveContour> contours : contoursMap.values())
+            TrackSegment segment = segments.get(i - 1);
+            
+            try
             {
-                for (ActiveContour contour : contours)
+                for (Detection detection : segment.getDetectionList())
                 {
-                    contour.clean();
+                    ((ActiveContour) detection).clean();
                 }
             }
-        }
-        else
-        {
-            ArrayList<TrackSegment> segments = new ArrayList<TrackSegment>(trackGroup.getTrackSegmentList());
-            
-            for (int i = 1; i <= segments.size(); i++)
+            catch (ConcurrentModificationException e)
             {
-                TrackSegment segment = segments.get(i - 1);
-                
-                try
-                {
-                    for (Detection detection : segment.getDetectionList())
-                    {
-                        ((ActiveContour) detection).clean();
-                    }
-                }
-                catch (ConcurrentModificationException e)
-                {
-                    // segment has probably changed while looking for a detection to paint
-                    // => ignore and wait for the next repaint
-                }
+                // segment has probably changed while looking for a detection to paint
+                // => ignore and wait for the next repaint
             }
         }
         
