@@ -15,7 +15,9 @@
         <javaElement handleIdentifier="=Active-Contours/src&lt;plugins.adufour.activecontours{ActiveContours.java"/>
         <javaElement handleIdentifier="=Active-Contours/src&lt;plugins.adufour.activecontours{ReSampler.java"/>
         <javaElement handleIdentifier="=Active-Contours/src&lt;plugins.adufour.activecontours{SlidingWindow.java"/>
+        <file path="/Active-Contours/src/plugins/adufour/activecontours/.DS_Store"/>
         <javaElement handleIdentifier="=Active-Contours/src&lt;plugins.adufour.activecontours{TopologyException.java"/>
+        <javaElement handleIdentifier="=Active-Contours/src&lt;plugins.adufour.activecontours{Mesh3D.java"/>
         <javaElement handleIdentifier="=Active-Contours/src&lt;plugins.adufour.activecontours{Polygon2D.java"/>
         <javaElement handleIdentifier="=Active-Contours/src&lt;plugins.adufour.activecontours{ActiveContoursOverlay.java"/>
     </selectedElements>

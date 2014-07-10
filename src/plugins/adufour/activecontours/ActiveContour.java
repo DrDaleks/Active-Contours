@@ -20,7 +20,7 @@ import plugins.nchenouard.spot.Detection;
  */
 public abstract class ActiveContour extends Detection implements Iterable<Point3d>
 {
-    final ActiveContours           owner;
+    // final ActiveContours owner;
     
     protected final SlidingWindow  convergence;
     
@@ -30,11 +30,10 @@ public abstract class ActiveContour extends Detection implements Iterable<Point3
     
     protected final BoundingBox    boundingBox    = new BoundingBox();
     
-    protected ActiveContour(ActiveContours owner, EzVarDouble contour_resolution, SlidingWindow convergenceWindow)
+    protected ActiveContour(EzVarDouble contour_resolution, SlidingWindow convergenceWindow)
     {
         super(0, 0, 0, 0);
         
-        this.owner = owner;
         this.resolution = contour_resolution;
         this.convergence = convergenceWindow;
         
@@ -48,7 +47,7 @@ public abstract class ActiveContour extends Detection implements Iterable<Point3
      */
     protected ActiveContour(ActiveContour contour)
     {
-        this(contour.owner, contour.resolution, new SlidingWindow(contour.convergence.getSize()));
+        this(contour.resolution, new SlidingWindow(contour.convergence.getSize()));
         
         setX(contour.x);
         setY(contour.y);
@@ -138,6 +137,18 @@ public abstract class ActiveContour extends Detection implements Iterable<Point3
      */
     abstract int computeFeedbackForces(ActiveContour target);
     
+    /**
+     * Compute the average image intensity inside the contour on the specified image data, and fill
+     * out the mask buffer to allow the global exterior mean to be computed
+     * 
+     * @param imageData
+     *            the data on which the average intensity should be computed
+     * @param channel
+     *            the channel on which the average intensity should be computed
+     * @param buffer
+     *            the binary mask buffer where this contour should be rasterised
+     * @return the average intensity inside the contour
+     */
     public abstract double computeAverageIntensity(Sequence imageData, int channel, Sequence buffer);
     
     /**
@@ -216,9 +227,12 @@ public abstract class ActiveContour extends Detection implements Iterable<Point3
     /**
      * @param type
      *            the type of ROI to export
+     * @param sequence
+     *            a sequence which can be used to retrieve the pixel size (may be needed if the
+     *            contour is defined in real units rather than pixel units)
      * @return a ROI representing the contour
      */
-    public abstract ROI toROI(ROIType type);
+    public abstract ROI toROI(ROIType type, Sequence sequence);
     
     /**
      * Paints the contour onto the specified sequence with the specified value

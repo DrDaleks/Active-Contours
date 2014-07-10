@@ -38,6 +38,8 @@ public class ReSampler implements Callable<Boolean>
             
             // the contour is either dividing or vanishing
             
+            contour.clean();
+            
             // 1) remove it from the list of contours
             
             allContours.remove(contour);
@@ -71,6 +73,8 @@ public class ReSampler implements Callable<Boolean>
             }
             
             // 3) Deal with the children
+            
+            if (e.children == null) return change;
             
             for (ActiveContour child : e.children)
             {

@@ -102,9 +102,9 @@ public class Polygon2D extends ActiveContour
     
     private boolean              counterClockWise;
     
-    protected Polygon2D(ActiveContours owner, EzVarDouble contour_resolution, SlidingWindow convergenceWindow)
+    protected Polygon2D(EzVarDouble contour_resolution, SlidingWindow convergenceWindow)
     {
-        super(owner, contour_resolution, convergenceWindow);
+        super(contour_resolution, convergenceWindow);
         
         setColor(Color.getHSBColor((float) Math.random(), 0.8f, 0.9f));
     }
@@ -116,7 +116,7 @@ public class Polygon2D extends ActiveContour
      */
     public Polygon2D(Polygon2D contour)
     {
-        this(contour.owner, contour.resolution, new SlidingWindow(contour.convergence.getSize()));
+        this(contour.resolution, new SlidingWindow(contour.convergence.getSize()));
         
         setX(contour.x);
         setY(contour.y);
@@ -146,9 +146,9 @@ public class Polygon2D extends ActiveContour
         counterClockWise = contour.counterClockWise;
     }
     
-    public Polygon2D(ActiveContours owner, EzVarDouble contour_resolution, SlidingWindow convergenceWindow, ROI2D roi)
+    public Polygon2D(EzVarDouble contour_resolution, SlidingWindow convergenceWindow, ROI2D roi)
     {
-        this(owner, contour_resolution, convergenceWindow);
+        this(contour_resolution, convergenceWindow);
         
         if (!(roi instanceof ROI2DEllipse) && !(roi instanceof ROI2DRectangle) && !(roi instanceof ROI2DPolygon) && !(roi instanceof ROI2DArea))
         {
@@ -357,7 +357,7 @@ public class Polygon2D extends ActiveContour
         Point3d center = new Point3d();
         
         int nPoints = j - i;
-        Polygon2D child1 = new Polygon2D(this.owner, resolution, new SlidingWindow(this.convergence.getSize()));
+        Polygon2D child1 = new Polygon2D(resolution, new SlidingWindow(this.convergence.getSize()));
         for (int p = 0; p < nPoints; p++)
         {
             Point3d pp = points.get(p + i);
@@ -373,7 +373,7 @@ public class Polygon2D extends ActiveContour
         center.set(0, 0, 0);
         
         nPoints = i + n - j;
-        Polygon2D child2 = new Polygon2D(this.owner, resolution, new SlidingWindow(this.convergence.getSize()));
+        Polygon2D child2 = new Polygon2D(resolution, new SlidingWindow(this.convergence.getSize()));
         for (int p = 0, pj = p + j; p < nPoints; p++, pj++)
         {
             Point3d pp = points.get(pj % n);
@@ -1544,11 +1544,11 @@ public class Polygon2D extends ActiveContour
     @Override
     public ROI2D toROI()
     {
-        return toROI(ROIType.AREA);
+        return toROI(ROIType.AREA, null);
     }
     
     @Override
-    public ROI2D toROI(ROIType type)
+    public ROI2D toROI(ROIType type, Sequence sequence)
     {
         ROI2D roi;
         

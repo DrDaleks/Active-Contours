@@ -1,27 +1,28 @@
 package plugins.adufour.activecontours;
 
 import icy.canvas.IcyCanvas;
+import icy.roi.BooleanMask2D;
 import icy.roi.ROI;
 import icy.roi.ROI3D;
 import icy.sequence.Sequence;
-import icy.system.SystemUtil;
 import icy.type.DataType;
 import icy.type.collection.array.Array1DUtil;
 import icy.type.rectangle.Rectangle3D;
 import icy.vtk.VtkUtil;
 
 import java.awt.BasicStroke;
-import java.awt.Color;
 import java.awt.Font;
 import java.awt.Graphics2D;
+import java.awt.Rectangle;
+import java.awt.geom.Rectangle2D;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.Stack;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 import javax.media.j3d.BoundingBox;
@@ -31,6 +32,8 @@ import javax.vecmath.Vector3d;
 import plugins.adufour.activecontours.ActiveContours.ROIType;
 import plugins.adufour.ezplug.EzVarDouble;
 import plugins.kernel.canvas.VtkCanvas;
+import plugins.kernel.roi.roi2d.ROI2DArea;
+import plugins.kernel.roi.roi3d.ROI3DArea;
 import vtk.vtkActor;
 import vtk.vtkDoubleArray;
 import vtk.vtkPoints;
@@ -252,7 +255,7 @@ public class Mesh3D extends ActiveContour
         }
     }
     
-    static final ExecutorService    threadPool = Executors.newFixedThreadPool(SystemUtil.getAvailableProcessors());
+    static final ExecutorService    threadPool = ActiveContours.createThreadPool("Mesh multi-thread service");
     
     final ArrayList<Face>           faces      = new ArrayList<Face>();
     
@@ -260,12 +263,9 @@ public class Mesh3D extends ActiveContour
     
     private VTKMesh                 vtkMesh    = null;
     
-    protected Mesh3D(ActiveContours owner, EzVarDouble contour_resolution, SlidingWindow convergenceWindow)
-    {
-        super(owner, contour_resolution, convergenceWindow);
-        
-        setColor(Color.getHSBColor((float) Math.random(), 0.8f, 0.9f));
-    }
+    private final double            pixelSizeXY;
+    
+    private final double            pixelSizeZ;
     
     /**
      * Creates a clone of the specified contour
@@ -274,7 +274,10 @@ public class Mesh3D extends ActiveContour
      */
     public Mesh3D(Mesh3D contour)
     {
-        this(contour.owner, contour.resolution, new SlidingWindow(contour.convergence.getSize()));
+        super(contour.resolution, new SlidingWindow(contour.convergence.getSize()));
+        
+        pixelSizeXY = contour.pixelSizeXY;
+        pixelSizeZ = contour.pixelSizeZ;
         
         setX(contour.x);
         setY(contour.y);
@@ -291,23 +294,19 @@ public class Mesh3D extends ActiveContour
             faces.add(new Face(f.v1, f.v2, f.v3));
     }
     
-    public Mesh3D(ActiveContours owner, double xyRes, double zRes, EzVarDouble contour_resolution, SlidingWindow convergenceWindow, ROI3D roi)
+    public Mesh3D(double pixelSizeXY, double pixelSizeZ, EzVarDouble contour_resolution, SlidingWindow convergenceWindow, ROI3D roi)
     {
-        this(owner, contour_resolution, convergenceWindow);
+        super(contour_resolution, convergenceWindow);
         
-        // just get the convex envelope, it's good enough
+        this.pixelSizeXY = pixelSizeXY;
+        this.pixelSizeZ = pixelSizeZ;
         
-        // Point3D.Integer[] points = roi.getBooleanMask(true).getContourPoints();
-        // Point3d[] doublePts = new Point3d[points.length];
-        // for (int i = 0; i < points.length; i++)
-        // doublePts[i] = new Point3d(points[i].x * xyRes, points[i].y * xyRes, points[i].z * zRes);
-        //
-        // QuickHull3D q3 = new QuickHull3D(doublePts);
-        //
-        // q3.triangulate();
-        
+        // for now, initialize a sphere "stretched" to the bounding box of the ROI
         try
         {
+            // start from an icosahedron of resolution 2
+            // it is inscribed in a sphere of radius PHI (the golden number)
+            
             double PHI = (1.0 + Math.sqrt(5.0)) / 2.0;
             
             // Declaration of the vertices
@@ -352,20 +351,43 @@ public class Mesh3D extends ActiveContour
             Rectangle3D r3 = roi.computeBounds3D();
             for (Point3d pt : this)
             {
-                pt.x = pt.x * (r3.getSizeX() * xyRes / 4) + (r3.getMinX() + r3.getSizeX() / 2) * xyRes;
-                pt.y = pt.y * (r3.getSizeY() * xyRes / 4) + (r3.getMinY() + r3.getSizeY() / 2) * xyRes;
-                pt.z = pt.z * (r3.getSizeZ() * zRes / 4) + (r3.getMinZ() + r3.getSizeZ() / 2) * zRes;
+                pt.x = pt.x * (r3.getSizeX() * pixelSizeXY / 4) + (r3.getMinX() + r3.getSizeX() / 2) * pixelSizeXY;
+                pt.y = pt.y * (r3.getSizeY() * pixelSizeXY / 4) + (r3.getMinY() + r3.getSizeY() / 2) * pixelSizeXY;
+                pt.z = pt.z * (r3.getSizeZ() * pixelSizeZ / 4) + (r3.getMinZ() + r3.getSizeZ() / 2) * pixelSizeZ;
             }
             
-            // reSample(0.6, 1.4);
+            // the resolution is now stretched...
+            double minResolution = (2 / PHI) * Math.min(r3.getSizeX() * pixelSizeXY, Math.min(r3.getSizeY() * pixelSizeXY, r3.getSizeZ() * pixelSizeZ));
+            
+            while (minResolution > (2 * resolution.getValue()))
+            {
+                // do global subdivisions (faster)
+                subdivide();
+                minResolution /= 2;
+                updateMetaData();
+            }
+            
+            // finish with a proper sampling
+            reSample(0.6, 1.4);
             
             updateMetaData();
         }
         catch (TopologyException e)
         {
+            System.err.println("Warning: couldn't initialize contour. Here is the stack trace: ");
             e.printStackTrace();
-            throw new RuntimeException(e);
+            // throw new RuntimeException(e);
         }
+    }
+    
+    public Mesh3D(double pixelSizeXY, double pixelSizeZ, EzVarDouble resolution, SlidingWindow slidingWindow, ArrayList<Vertex> newVertices, ArrayList<Face> newFaces)
+    {
+        super(resolution, slidingWindow);
+        
+        this.pixelSizeXY = pixelSizeXY;
+        this.pixelSizeZ = pixelSizeZ;
+        
+        setMeshData(newVertices, newFaces);
     }
     
     /**
@@ -550,7 +572,7 @@ public class Mesh3D extends ActiveContour
     {
         if (vtkMesh != null)
         {
-            vtkMesh.clean();
+            vtkMesh.setRenderer(null);
         }
     }
     
@@ -798,6 +820,8 @@ public class Mesh3D extends ActiveContour
     {
         for (Vertex v : vertices)
         {
+            if (v == null) continue;
+            
             v.drivingForces.scaleAdd(weight, v.normal, v.drivingForces);
         }
     }
@@ -1031,6 +1055,27 @@ public class Mesh3D extends ActiveContour
         return crossCount % 2 == 1 ? penetration : 0;
     }
     
+    @Override
+    public double getX()
+    {
+        // get this is pixel units
+        return super.getX() / pixelSizeXY;
+    }
+    
+    @Override
+    public double getY()
+    {
+        // get this is pixel units
+        return super.getY() / pixelSizeXY;
+    }
+    
+    @Override
+    public double getZ()
+    {
+        // get this is pixel units
+        return super.getZ() / pixelSizeZ;
+    }
+    
     public double getDimension(int order)
     {
         switch (order)
@@ -1158,9 +1203,13 @@ public class Mesh3D extends ActiveContour
         int height = data.getSizeY();
         int depth = data.getSizeZ();
         
-        final int i = (int) Math.round(x);
-        final int j = (int) Math.round(y);
-        final int k = (int) Math.round(z);
+        x /= data.getPixelSizeX();
+        y /= data.getPixelSizeY();
+        z /= data.getPixelSizeZ();
+        
+        final int i = (int) Math.floor(x);
+        final int j = (int) Math.floor(y);
+        final int k = (int) Math.floor(z);
         
         if (i < 0 || i >= width - 1) return 0;
         if (j < 0 || j >= height - 1) return 0;
@@ -1304,12 +1353,13 @@ public class Mesh3D extends ActiveContour
     @Override
     public void paint(Graphics2D g, Sequence sequence, IcyCanvas canvas)
     {
-        // only paint detections on the current frame
-        if (getT() != canvas.getPositionT()) return;
-        
-        if (g != null)
+        if (g != null) // 2D viewer
         {
-            // 2D viewer
+            // only paint detections on the current frame
+            if (getT() != canvas.getPositionT()) return;
+            
+            // nullify the VTK mesh to prevent nasty VTK crashes
+            if (vtkMesh != null) vtkMesh = null;
             
             float fontSize = (float) canvas.canvasToImageLogDeltaX(30);
             g.setFont(new Font("Trebuchet MS", Font.BOLD, 10).deriveFont(fontSize));
@@ -1320,18 +1370,31 @@ public class Mesh3D extends ActiveContour
             
             g.setColor(getColor());
             
-            // g.drawString("[3D mesh]", (float) x, (float) y);
-            
-            // TODO draw something more in 2D (points? raster mesh?)
-            
             Point3d upper = new Point3d(), lower = new Point3d();
             boundingBox.getUpper(upper);
             boundingBox.getLower(lower);
-            int x = (int) (lower.x / sequence.getPixelSizeX());
-            int y = (int) (lower.y / sequence.getPixelSizeY());
-            int w = (int) ((1 + upper.x - lower.x) / sequence.getPixelSizeX());
-            int h = (int) ((1 + upper.y - lower.y) / sequence.getPixelSizeY());
-            g.drawRect(x, y, w, h);
+            
+            // draw a rectangle around the bounding box (for now)
+            
+            double resX = sequence.getPixelSizeX();
+            double resY = sequence.getPixelSizeY();
+            double resZ = sequence.getPixelSizeZ();
+            
+            upper.x /= resX;
+            lower.x /= resX;
+            
+            upper.y /= resY;
+            lower.y /= resY;
+            
+            upper.z /= resZ;
+            lower.z /= resZ;
+            
+            Rectangle2D.Double bounds = new Rectangle2D.Double(lower.x, lower.y, upper.x - lower.x + 1, upper.y - lower.y + 1);
+            
+            int posZ = canvas.getPositionZ();
+            
+            if (posZ >= lower.z && posZ <= upper.z) g.draw(bounds);
+            
         }
         else if (canvas instanceof VtkCanvas)
         {
@@ -1339,10 +1402,12 @@ public class Mesh3D extends ActiveContour
             
             if (vtkMesh == null)
             {
-                vtkMesh = new VTKMesh(((VtkCanvas) canvas).getRenderer());
+                vtkMesh = new VTKMesh();
                 vtkMesh.update();
-                vtkMesh.renderer.AddActor(vtkMesh.actor);
             }
+            
+            // render only if the frame number is correct
+            vtkMesh.setRenderer(getT() != canvas.getPositionT() ? null : ((VtkCanvas) canvas).getRenderer());
         }
         else
         {
@@ -1369,22 +1434,21 @@ public class Mesh3D extends ActiveContour
         
         // if there are 2 faces only in the mesh, it should be destroyed
         
-        if (faces.size() == 2)
-        {
-            throw new TopologyException(this, null);
-        }
+        if (faces.size() < 10) throw new TopologyException(this, new Mesh3D[0]);
         
-        // FIXME proper self-intersection (not just division)
+        Mesh3D[] children = checkSelfIntersection(minLength);
+        
+        if (children != null) throw new TopologyException(this, children);
         
         boolean noChange = false;
         
-        int cpt = -1;
+        // int cpt = -1;
         
         while (noChange == false)
         {
             noChange = true;
             
-            cpt++;
+            // cpt++;
             
             // we are looking for 2 faces f1 = a-b-c1 and f2 = b-a-c2
             // such that they share an edge a-b that is either
@@ -1519,9 +1583,12 @@ public class Mesh3D extends ActiveContour
                     
                     // Here, the normal merge operation can be implemented
                     
-                    // remove the 2 faces
-                    faces.remove(f1);
-                    faces.remove(f2);
+                    synchronized (faces)
+                    {
+                        // remove the 2 faces
+                        faces.remove(f1);
+                        faces.remove(f2);
+                    }
                     
                     // move v1 to the middle of v1-v2
                     vx1.position.interpolate(vx2.position, 0.5);
@@ -1609,9 +1676,9 @@ public class Mesh3D extends ActiveContour
             
             // prevent infinite loop
             // if (cpt > vertices.size()) noChange = true;
+            updateMetaData();
         }
         
-        updateMetaData();
     }
     
     @Override
@@ -1704,8 +1771,7 @@ public class Mesh3D extends ActiveContour
                     break;
                 }
             
-            Mesh3D newMesh = new Mesh3D(owner, resolution, new SlidingWindow(convergence.getSize()));
-            newMesh.setMeshData(newVertices, newFaces);
+            Mesh3D newMesh = new Mesh3D(pixelSizeXY, pixelSizeZ, resolution, new SlidingWindow(convergence.getSize()), newVertices, newFaces);
             newMesh.setT(getT());
             
             if (newMesh.getDimension(0) > 4) children[child] = newMesh;
@@ -1727,9 +1793,39 @@ public class Mesh3D extends ActiveContour
         {
             this.vertices.clear();
             this.vertices.addAll(newVertices);
+        }
+        synchronized (faces)
+        {
             this.faces.clear();
             this.faces.addAll(newFaces);
         }
+        updateMetaData();
+    }
+    
+    private void subdivide() throws TopologyException
+    {
+        ArrayList<Face> oldFaces = new ArrayList<Face>(faces);
+        
+        faces.clear();
+        faces.ensureCapacity(faces.size() * 4);
+        
+        for (Vertex v : vertices)
+            if (v != null) v.neighbors.clear();
+        
+        for (Face f : oldFaces)
+        {
+            int centerv1v2 = addVertexBetween(f.v1, f.v2);
+            
+            int centerv2v3 = addVertexBetween(f.v2, f.v3);
+            
+            int centerv3v1 = addVertexBetween(f.v3, f.v1);
+            
+            addFace(f.v1, centerv1v2, centerv3v1);
+            addFace(centerv1v2, f.v2, centerv2v3);
+            addFace(centerv2v3, f.v3, centerv3v1);
+            addFace(centerv1v2, centerv2v3, centerv3v1);
+        }
+        
         updateMetaData();
     }
     
@@ -1803,14 +1899,186 @@ public class Mesh3D extends ActiveContour
     @Override
     public ROI3D toROI()
     {
-        return toROI(ROIType.AREA);
+        throw new UnsupportedOperationException("Cannot export a surface mesh into a ROI without knowing the pixel size");
     }
     
     @Override
-    public ROI3D toROI(ROIType type)
+    public ROI3D toROI(ROIType type, Sequence sequence)
     {
-        // TODO Auto-generated method stub
-        return null;
+        switch (type)
+        {
+        case AREA:
+            
+            final ROI3DArea r3 = new ROI3DArea();
+            r3.beginUpdate();
+            
+            // direction of scan: along X
+            final Vector3d direction = new Vector3d(1, 0, 0);
+            
+            final double resX = sequence.getPixelSizeX();
+            final double resY = sequence.getPixelSizeY();
+            final double resZ = sequence.getPixelSizeZ();
+            
+            Point3d boxMin = new Point3d(),
+            boxMax = new Point3d();
+            BoundingBox bbox = getBoundingBox();
+            bbox.getLower(boxMin);
+            bbox.getUpper(boxMax);
+            
+            final int minX = (int) Math.floor(boxMin.x / resX) - 1;
+            final int minY = (int) Math.floor(boxMin.y / resY) - 1;
+            final int minZ = (int) Math.floor(boxMin.z / resZ) - 1;
+            
+            final int maxX = (int) Math.ceil(boxMax.x / resX) + 1;
+            final int maxY = (int) Math.ceil(boxMax.y / resY) + 1;
+            final int maxZ = (int) Math.ceil(boxMax.z / resZ) + 1;
+            
+            final int maskWidth = maxX - minX + 1;
+            final int maskHeight = maxY - minY + 1;
+            final int maskDepth = maxZ - minZ + 1;
+            
+            // epsilon used for the line-triangle intersection test
+            final double epsilon = 1.0e-13;
+            
+            ArrayList<Future<?>> sliceTasks = new ArrayList<Future<?>>(maskDepth);
+            
+            for (int k = minZ; k <= maxZ; k++)
+            {
+                final int slice = k;
+                
+                Runnable sliceTask = new Runnable()
+                {
+                    @Override
+                    public void run()
+                    {
+                        boolean[] maskSlice = new boolean[maskWidth * maskHeight];
+                        
+                        Point3d origin = new Point3d(minX * resX, minY * resY, slice * resZ);
+                        
+                        Vector3d edge1 = new Vector3d();
+                        Vector3d edge2 = new Vector3d();
+                        Vector3d vp = new Vector3d();
+                        Vector3d vt = new Vector3d();
+                        Vector3d vq = new Vector3d();
+                        
+                        ArrayList<Integer> intersections = new ArrayList<Integer>(4);
+                        
+                        for (int j = minY; j < maxY; j++, origin.y += resY)
+                        {
+                            int lineOffset = (j - minY) * maskWidth;
+                            
+                            intersections.clear();
+                            int nbCrosses = 0;
+                            
+                            for (Face f : faces)
+                            {
+                                Point3d v1 = vertices.get(f.v1).position;
+                                Point3d v2 = vertices.get(f.v2).position;
+                                Point3d v3 = vertices.get(f.v3).position;
+                                
+                                // raw intersection test with the face bounds
+                                
+                                if (origin.y < v1.y && origin.y < v2.y && origin.y < v3.y) continue;
+                                if (origin.z < v1.z && origin.z < v2.z && origin.z < v3.z) continue;
+                                if (origin.y > v1.y && origin.y > v2.y && origin.y > v3.y) continue;
+                                if (origin.z > v1.z && origin.z > v2.z && origin.z > v3.z) continue;
+                                
+                                // more precise ray-triangle intersection test
+                                
+                                edge1.sub(v2, v1);
+                                edge2.sub(v3, v1);
+                                
+                                vp.cross(direction, edge2);
+                                
+                                double det = edge1.dot(vp);
+                                
+                                if (Math.abs(det) < epsilon) continue;
+                                
+                                double inv_det = 1.0 / det;
+                                
+                                vt.sub(origin, v1);
+                                double u = vt.dot(vp) * inv_det;
+                                if (u < 0 || u > 1.0) continue;
+                                
+                                vq.cross(vt, edge1);
+                                double v = direction.dot(vq) * inv_det;
+                                if (v < 0.0 || u + v > 1.0) continue;
+                                
+                                // intersection found, compute the distance
+                                
+                                double distance = edge2.dot(vq) * inv_det;
+                                Integer distanceInVoxels = (int) Math.round(distance / resX);
+                                
+                                if (distanceInVoxels < 0) continue;
+                                
+                                if (!intersections.contains(distanceInVoxels))
+                                {
+                                    intersections.add(distanceInVoxels);
+                                    nbCrosses++;
+                                }
+                                else
+                                {
+                                    // if a distance appears twice, then the mesh "slices" the same
+                                    // voxel twice (rounding off to the same integer distance)
+                                    // => it's a double crossing
+                                    // ==> remove the first occurrence (forget about it)
+                                    intersections.remove(distanceInVoxels);
+                                    nbCrosses--;
+                                }
+                            }
+                            
+                            // if nbCrosses = 0, the ray never crosses the mesh
+                            // if nbCrosses = 1, the ray is tangent to the mesh
+                            if (nbCrosses < 2) continue;
+                            
+                            Collections.sort(intersections);
+                            
+                            if (nbCrosses == 3)
+                            {
+                                intersections.remove(1);
+                                nbCrosses--;
+                            }
+                            
+                            for (int cross = 0; cross < nbCrosses; cross += 2)
+                            {
+                                int start = intersections.get(cross);
+                                int stop = intersections.get(cross + 1);
+                                
+                                Arrays.fill(maskSlice, start + lineOffset, stop + lineOffset, true);
+                            }
+                        }
+                        synchronized (r3)
+                        {
+                            r3.setSlice(slice, new ROI2DArea(new BooleanMask2D(new Rectangle(maskWidth, maskHeight), maskSlice)));
+                        }
+                    }
+                };
+                
+                sliceTasks.add(threadPool.submit(sliceTask));
+            }
+            
+            try
+            {
+                for (Future<?> sliceTask : sliceTasks)
+                    sliceTask.get();
+                r3.translate(minX, minY, 0);
+            }
+            catch (InterruptedException e)
+            {
+                // preserve the interrupted state
+                Thread.currentThread().interrupt();
+            }
+            catch (ExecutionException e)
+            {
+                e.printStackTrace();
+            }
+            
+            r3.endUpdate();
+            return r3;
+            
+        default:
+            throw new UnsupportedOperationException("Cannot export 3D surface meshes as polygons (coming soon)");
+        }
     }
     
     private class VTKMesh
@@ -1821,9 +2089,9 @@ public class Mesh3D extends ActiveContour
         public final vtkPolyData        polyData          = new vtkPolyData();
         private final vtkPolyDataMapper polyDataMapper    = new vtkPolyDataMapper();
         public final vtkActor           actor             = new vtkActor();
-        private final vtkRenderer       renderer;
+        private vtkRenderer             renderer;
         
-        VTKMesh(vtkRenderer renderer)
+        VTKMesh()
         {
             this.vtkVerticesCoords.SetNumberOfComponents(3);
             this.vtkVerticesInfo.SetData(this.vtkVerticesCoords);
@@ -1832,59 +2100,69 @@ public class Mesh3D extends ActiveContour
             this.polyDataMapper.SetInputData(this.polyData);
             
             this.actor.SetMapper(this.polyDataMapper);
-            
-            this.renderer = renderer;
         }
         
         public void update()
         {
-            synchronized (vertices)
+            synchronized (faces)
             {
-                int nFaces = faces.size();
-                
-                if (nFaces == 0) return;
-                
-                double[] vertices = new double[Mesh3D.this.vertices.size() * 3];
-                
-                int cIndex = 0;
-                for (Vertex vertex : Mesh3D.this.vertices)
+                synchronized (vertices)
                 {
-                    if (vertex == null)
+                    
+                    int nFaces = faces.size();
+                    
+                    if (nFaces == 0) return;
+                    
+                    double[] vertexBuffer = new double[vertices.size() * 3];
+                    
+                    int cIndex = 0;
+                    for (Vertex vertex : vertices)
                     {
-                        cIndex += 3;
+                        if (vertex == null)
+                        {
+                            cIndex += 3;
+                        }
+                        else
+                        {
+                            vertexBuffer[(cIndex++)] = vertex.position.x;
+                            vertexBuffer[(cIndex++)] = vertex.position.y;
+                            vertexBuffer[(cIndex++)] = vertex.position.z;
+                        }
                     }
-                    else
+                    this.vtkVerticesCoords.SetJavaArray(vertexBuffer);
+                    
+                    int[] indexBuffer = new int[nFaces * 4];
+                    
+                    int vIndex = 0;
+                    for (Face face : faces)
                     {
-                        vertices[(cIndex++)] = vertex.position.x;
-                        vertices[(cIndex++)] = vertex.position.y;
-                        vertices[(cIndex++)] = vertex.position.z;
+                        indexBuffer[(vIndex++)] = 3;
+                        indexBuffer[(vIndex++)] = face.v1.intValue();
+                        indexBuffer[(vIndex++)] = face.v2.intValue();
+                        indexBuffer[(vIndex++)] = face.v3.intValue();
                     }
+                    
+                    this.polyData.SetPolys(VtkUtil.getCells(nFaces, indexBuffer));
                 }
-                this.vtkVerticesCoords.SetJavaArray(vertices);
-                
-                int[] faces = new int[nFaces * 4];
-                
-                int vIndex = 0;
-                for (Face face : Mesh3D.this.faces)
-                {
-                    faces[(vIndex++)] = 3;
-                    faces[(vIndex++)] = face.v1.intValue();
-                    faces[(vIndex++)] = face.v2.intValue();
-                    faces[(vIndex++)] = face.v3.intValue();
-                }
-                
-                this.polyData.SetPolys(VtkUtil.getCells(nFaces, faces));
             }
         }
         
-        public void clean()
+        public void setRenderer(vtkRenderer newRenderer)
         {
-            if ((this.renderer != null) && (this.actor != null)) this.renderer.RemoveActor(this.actor);
+            if (vtkMesh == null) return;
+            
+            if (renderer == newRenderer) return;
+            
+            if ((renderer != null) && (actor != null)) renderer.RemoveActor(this.actor);
+            
+            renderer = newRenderer;
+            
+            if (renderer != null) renderer.AddActor(actor);
         }
     }
     
     @Override
-    public void toSequence(Sequence output, double value)
+    public void toSequence(Sequence output, final double value)
     {
         // direction of scan: along X
         final Vector3d direction = new Vector3d(1, 0, 0);
@@ -1893,9 +2171,11 @@ public class Mesh3D extends ActiveContour
         final int height = output.getSizeY();
         final int depth = output.getSizeZ();
         
-        final double resX = 1;// output.getPixelSizeX();
-        final double resY = 1;// output.getPixelSizeY();
-        final double resZ = 1;// output.getPixelSizeZ();
+        final DataType dataType = output.getDataType_();
+        
+        final double resX = output.getPixelSizeX();
+        final double resY = output.getPixelSizeY();
+        final double resZ = output.getPixelSizeZ();
         
         Point3d boxMin = new Point3d(), boxMax = new Point3d();
         BoundingBox bbox = getBoundingBox();
@@ -1906,18 +2186,17 @@ public class Mesh3D extends ActiveContour
         final int minY = Math.max(0, (int) Math.floor(boxMin.y / resY) - 1);
         final int minZ = Math.max(0, (int) Math.floor(boxMin.z / resZ) - 1);
         
-        final int maxX = Math.min(scanLine - 1, (int) Math.ceil(boxMax.x / resX) + 1);
         final int maxY = Math.min(height - 1, (int) Math.ceil(boxMax.y / resY) + 1);
         final int maxZ = Math.min(depth - 1, (int) Math.ceil(boxMax.z / resZ) + 1);
         
         // epsilon used for the line-triangle intersection test
-        final double epsilon = 1.0e-12;
+        final double epsilon = 1.0e-13;
         
         ArrayList<Future<?>> sliceTasks = new ArrayList<Future<?>>(maxZ - minZ + 1);
         
         for (int k = minZ; k <= maxZ; k++)
         {
-            final Object maskSlice = output.getDataXY(0, k, 0);
+            final Object outputSlice = output.getDataXY(0, k, 0);
             
             final int slice = k;
             
@@ -1926,14 +2205,103 @@ public class Mesh3D extends ActiveContour
                 @Override
                 public void run()
                 {
-                    for (int j = minY; j < maxY; j++)
-                        for (int i = minX; i < maxX; i++)
+                    Point3d origin = new Point3d(minX * resX, minY * resY, slice * resZ);
+                    
+                    Vector3d edge1 = new Vector3d();
+                    Vector3d edge2 = new Vector3d();
+                    Vector3d vp = new Vector3d();
+                    Vector3d vt = new Vector3d();
+                    Vector3d vq = new Vector3d();
+                    
+                    ArrayList<Integer> intersections = new ArrayList<Integer>(4);
+                    
+                    for (int j = minY; j < maxY; j++, origin.y += resY)
+                    {
+                        int lineOffset = j * scanLine;
+                        
+                        intersections.clear();
+                        int nbCrosses = 0;
+                        
+                        for (Face f : faces)
                         {
-                            if (contains(new Point3d(i, j, slice)) > 0)
+                            Point3d v1 = vertices.get(f.v1).position;
+                            Point3d v2 = vertices.get(f.v2).position;
+                            Point3d v3 = vertices.get(f.v3).position;
+                            
+                            // raw intersection test with the face bounds
+                            
+                            if (origin.y < v1.y && origin.y < v2.y && origin.y < v3.y) continue;
+                            if (origin.z < v1.z && origin.z < v2.z && origin.z < v3.z) continue;
+                            if (origin.y > v1.y && origin.y > v2.y && origin.y > v3.y) continue;
+                            if (origin.z > v1.z && origin.z > v2.z && origin.z > v3.z) continue;
+                            
+                            // more precise ray-triangle intersection test
+                            
+                            edge1.sub(v2, v1);
+                            edge2.sub(v3, v1);
+                            
+                            vp.cross(direction, edge2);
+                            
+                            double det = edge1.dot(vp);
+                            
+                            if (Math.abs(det) < epsilon) continue;
+                            
+                            double inv_det = 1.0 / det;
+                            
+                            vt.sub(origin, v1);
+                            double u = vt.dot(vp) * inv_det;
+                            if (u < 0 || u > 1.0) continue;
+                            
+                            vq.cross(vt, edge1);
+                            double v = direction.dot(vq) * inv_det;
+                            if (v < 0.0 || u + v > 1.0) continue;
+                            
+                            // intersection found, compute the distance
+                            
+                            double distance = edge2.dot(vq) * inv_det;
+                            Integer distanceInVoxels = minX + (int) Math.round(distance / resX);
+                            
+                            if (distanceInVoxels < 0) continue;
+                            
+                            if (!intersections.contains(distanceInVoxels))
                             {
-                                Array1DUtil.setValue(maskSlice, i + scanLine * j, 3000);
+                                intersections.add(distanceInVoxels);
+                                nbCrosses++;
+                            }
+                            else
+                            {
+                                // if a distance appears twice, then the mesh "slices" the same
+                                // voxel twice (rounding off to the same integer distance)
+                                // => it's a double crossing
+                                // ==> remove the first occurrence (forget about it)
+                                intersections.remove(distanceInVoxels);
+                                nbCrosses--;
                             }
                         }
+                        
+                        // if nbCrosses = 0, the ray never crosses the mesh
+                        // if nbCrosses = 1, the ray is tangent to the mesh
+                        if (nbCrosses < 2) continue;
+                        
+                        Collections.sort(intersections);
+                        
+                        if (nbCrosses == 3)
+                        {
+                            intersections.remove(1);
+                            nbCrosses--;
+                        }
+                        
+                        for (int cross = 0; cross < nbCrosses; cross += 2)
+                        {
+                            int start = intersections.get(cross);
+                            int stop = intersections.get(cross + 1);
+                            
+                            for (int i = start; i < stop; i++)
+                            {
+                                Array1DUtil.setValue(outputSlice, lineOffset + i, dataType, value);
+                            }
+                        }
+                    }
                 }
             };
             
@@ -1943,9 +2311,7 @@ public class Mesh3D extends ActiveContour
         try
         {
             for (Future<?> sliceTask : sliceTasks)
-            {
                 sliceTask.get();
-            }
         }
         catch (InterruptedException e)
         {
@@ -1954,9 +2320,7 @@ public class Mesh3D extends ActiveContour
         }
         catch (ExecutionException e)
         {
-            e.getCause().printStackTrace();
             e.printStackTrace();
         }
-        
     }
 }
