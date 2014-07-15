@@ -30,13 +30,15 @@ public class ReSampler implements Callable<Boolean>
         boolean change = false;
         try
         {
-            contour.reSample(0.8, 1.4);
+            contour.reSample(0.6, 1.4);
         }
         catch (TopologyException e)
         {
             change = true;
             
             // the contour is either dividing or vanishing
+            
+            contour.clean();
             
             // 1) remove it from the list of contours
             
@@ -71,6 +73,8 @@ public class ReSampler implements Callable<Boolean>
             }
             
             // 3) Deal with the children
+            
+            if (e.children == null) return change;
             
             for (ActiveContour child : e.children)
             {
