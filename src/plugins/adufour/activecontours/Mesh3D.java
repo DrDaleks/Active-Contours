@@ -22,7 +22,6 @@ import java.util.Iterator;
 import java.util.Stack;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 
 import javax.media.j3d.BoundingBox;
@@ -255,13 +254,11 @@ public class Mesh3D extends ActiveContour
         }
     }
     
-    static final ExecutorService    threadPool = ActiveContours.createThreadPool("Mesh multi-thread service");
+    final ArrayList<Face>           faces    = new ArrayList<Face>();
     
-    final ArrayList<Face>           faces      = new ArrayList<Face>();
+    private final ArrayList<Vertex> vertices = new ArrayList<Vertex>();
     
-    private final ArrayList<Vertex> vertices   = new ArrayList<Vertex>();
-    
-    private VTKMesh                 vtkMesh    = null;
+    private VTKMesh                 vtkMesh  = null;
     
     private final double            pixelSizeXY;
     
@@ -754,7 +751,7 @@ public class Mesh3D extends ActiveContour
                 }
             };
             
-            sliceTasks.add(threadPool.submit(sliceTask));
+            sliceTasks.add(processor.submit(sliceTask));
         }
         
         try
@@ -2054,7 +2051,7 @@ public class Mesh3D extends ActiveContour
                     }
                 };
                 
-                sliceTasks.add(threadPool.submit(sliceTask));
+                sliceTasks.add(processor.submit(sliceTask));
             }
             
             try
@@ -2305,7 +2302,7 @@ public class Mesh3D extends ActiveContour
                 }
             };
             
-            sliceTasks.add(threadPool.submit(sliceTask));
+            sliceTasks.add(processor.submit(sliceTask));
         }
         
         try

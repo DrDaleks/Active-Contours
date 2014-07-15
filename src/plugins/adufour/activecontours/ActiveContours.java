@@ -16,6 +16,7 @@ import icy.sequence.SequenceUtil;
 import icy.swimmingPool.SwimmingObject;
 import icy.system.IcyHandledException;
 import icy.system.SystemUtil;
+import icy.system.thread.Processor;
 import icy.system.thread.ThreadUtil;
 import icy.type.DataType;
 import icy.util.ShapeUtil.BooleanOperator;
@@ -33,12 +34,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadFactory;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 
 import javax.vecmath.Point3d;
 
@@ -76,21 +72,6 @@ import plugins.nchenouard.spot.Detection;
 
 public class ActiveContours extends EzPlug implements EzStoppable, Block
 {
-    static ExecutorService createThreadPool(final String name)
-    {
-        return new ThreadPoolExecutor(SystemUtil.getAvailableProcessors(), SystemUtil.getAvailableProcessors(), 10, TimeUnit.SECONDS, new LinkedBlockingQueue<Runnable>(),
-                new ThreadFactory()
-                {
-                    volatile int threadCount = 0;
-                    
-                    @Override
-                    public Thread newThread(Runnable r)
-                    {
-                        return new Thread(r, name + " (thread #" + ++threadCount + ")");
-                    }
-                });
-    }
-    
     private final double              EPSILON               = 0.0000001;
     
     private final EzVarBoolean        showAdvancedOptions   = new EzVarBoolean("Show advanced options", false);
@@ -172,7 +153,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     private HashMap<TrackSegment, Double>       region_cout         = new HashMap<TrackSegment, Double>(0);
     
     public final VarROIArray                    roiInput            = new VarROIArray("input ROI");
-    public final VarROIArray                         roiOutput           = new VarROIArray("Regions of interest");
+    public final VarROIArray                    roiOutput           = new VarROIArray("Regions of interest");
     
     private boolean                             globalStop;
     
@@ -180,7 +161,12 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     
     private ActiveContoursOverlay               overlay;
     
-    private ExecutorService                     multiThreadService  = createThreadPool("Active contours thread #");
+    private Processor                           multiThreadService  = new Processor(SystemUtil.getAvailableProcessors());
+    
+    public ActiveContours()
+    {
+        multiThreadService.setDefaultThreadName("Active Contours");
+    }
     
     public TrackGroup getTrackGroup()
     {
@@ -766,7 +752,6 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         }
         catch (Exception e)
         {
-            stopExecution();
             if (e.getCause() instanceof EzException) throw (EzException) e.getCause();
             e.printStackTrace();
         }
@@ -840,13 +825,27 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             if (evolvingContours.size() == 0) break;
             
             // re-sample the contours to ensure homogeneous resolution
-            boolean contourListChanged = resampleContours(evolvingContours, allContours, t);
+            resampleContours(evolvingContours, allContours, t);
             
-            // update region information every 10 iterations
+            // update region information (if necessary):
+            // - every 10 iterations
+            // if the contour list has changed
             
-            boolean updateTimeReached = iter % (convergence_winSize.getValue() / 3) == 0;
-            
-            if (region_weight.getValue() > EPSILON && updateTimeReached || contourListChanged) updateRegionInformation(allContours, t);
+            if (region_weight.getValue() > EPSILON)
+            {
+                boolean updateRegionStatistics = iter % (convergence_winSize.getValue() / 3) == 0;
+                
+                for (ActiveContour contour : allContours)
+                {
+                    // make sure this contour's statistics exist
+                    if (region_cout.containsKey(trackGroup.getTrackSegmentWithDetection(contour))) continue;
+                    
+                    updateRegionStatistics = true;
+                    break;
+                }
+                
+                if (updateRegionStatistics) updateRegionInformation(allContours, t);
+            }
             
             // compute deformations issued from the energy minimization
             deformContours(evolvingContours, allContours, field);
@@ -1031,13 +1030,11 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
      * @return <code>true</code> if the list of contours has changed (a contour has vanished or
      *         divided), <code>false</code> otherwise
      */
-    private boolean resampleContours(final HashSet<ActiveContour> evolvingContours, final HashSet<ActiveContour> allContours, final int t)
+    private void resampleContours(final HashSet<ActiveContour> evolvingContours, final HashSet<ActiveContour> allContours, final int t)
     {
         final VarBoolean loop = new VarBoolean("loop", true);
         
         final VarBoolean change = new VarBoolean("change", false);
-        
-        int nbContours = evolvingContours.size();
         
         while (loop.getValue())
         {
@@ -1080,7 +1077,6 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 {
                     // reset the interrupted flag
                     Thread.currentThread().interrupt();
-                    return nbContours != evolvingContours.size();
                 }
                 catch (ExecutionException e)
                 {
@@ -1097,8 +1093,6 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 }
             }
         }
-        
-        return nbContours != evolvingContours.size();
     }
     
     private void updateRegionInformation(HashSet<ActiveContour> contours, int t)

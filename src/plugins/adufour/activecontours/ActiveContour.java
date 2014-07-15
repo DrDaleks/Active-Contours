@@ -2,6 +2,8 @@ package plugins.adufour.activecontours;
 
 import icy.roi.ROI;
 import icy.sequence.Sequence;
+import icy.system.SystemUtil;
+import icy.system.thread.Processor;
 
 import java.awt.Color;
 
@@ -20,7 +22,7 @@ import plugins.nchenouard.spot.Detection;
  */
 public abstract class ActiveContour extends Detection implements Iterable<Point3d>
 {
-    // final ActiveContours owner;
+    protected final Processor      processor        = new Processor(SystemUtil.getAvailableProcessors() * 2);
     
     protected final SlidingWindow  convergence;
     
@@ -38,6 +40,8 @@ public abstract class ActiveContour extends Detection implements Iterable<Point3
         this.convergence = convergenceWindow;
         
         setColor(Color.getHSBColor((float) Math.random(), 0.8f, 0.9f));
+        
+        processor.setDefaultThreadName(getClass().getSimpleName());
     }
     
     /**
