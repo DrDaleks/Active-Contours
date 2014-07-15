@@ -766,10 +766,9 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         }
         catch (Exception e)
         {
-            // stopExecution();
+            stopExecution();
             if (e.getCause() instanceof EzException) throw (EzException) e.getCause();
             e.printStackTrace();
-            throw new RuntimeException(e.getCause());
         }
     }
     

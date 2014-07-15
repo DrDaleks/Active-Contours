@@ -32,7 +32,7 @@ public class ReSampler implements Callable<Boolean>
         {
             contour.reSample(0.6, 1.4);
         }
-        catch (TopologyException e)
+        catch (Exception e)
         {
             change = true;
             
@@ -72,11 +72,15 @@ public class ReSampler implements Callable<Boolean>
                 }
             }
             
+            if (! (e instanceof TopologyException)) return change;
+            
             // 3) Deal with the children
             
-            if (e.children == null) return change;
+            ActiveContour[] children = ((TopologyException) e).children;
             
-            for (ActiveContour child : e.children)
+            if (children == null) return change;
+            
+            for (ActiveContour child : children)
             {
                 child.setT(contour.getT());
                 allContours.add(child);

@@ -1442,13 +1442,13 @@ public class Mesh3D extends ActiveContour
         
         boolean noChange = false;
         
-        // int cpt = -1;
+        int cpt = -1;
         
         while (noChange == false)
         {
             noChange = true;
             
-            // cpt++;
+            cpt++;
             
             // we are looking for 2 faces f1 = a-b-c1 and f2 = b-a-c2
             // such that they share an edge a-b that is either
@@ -1675,7 +1675,7 @@ public class Mesh3D extends ActiveContour
             }
             
             // prevent infinite loop
-            // if (cpt > vertices.size()) noChange = true;
+            if (cpt > vertices.size() * 2) noChange = true;
             updateMetaData();
         }
         
