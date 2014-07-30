@@ -152,12 +152,10 @@ public class Polygon2D extends ActiveContour
         
         if (!(roi instanceof ROI2DEllipse) && !(roi instanceof ROI2DRectangle) && !(roi instanceof ROI2DPolygon) && !(roi instanceof ROI2DArea))
         {
-            throw new EzException("Wrong ROI type. Only Rectangle, Ellipse, Polygon and Area are supported", true);
+            throw new EzException("Active contours: the input ROI is not valid. Only Rectangle, Ellipse, Polygon and Area are supported", true);
         }
         
         setZ(roi.getZ());
-        
-        boolean contourOK = false;
         
         if (roi instanceof ROI2DArea)
         {
@@ -177,19 +175,13 @@ public class Polygon2D extends ActiveContour
                 roi = new ROI2DEllipse(roi.getBounds2D());
             }
             
-            if (points.size() < 4)
-            {
-                // replace by ellipse
-                roi = new ROI2DEllipse(roi.getBounds2D());
-            }
-            else
-            {
-                contourOK = true;
-            }
         }
         
-        if (!contourOK)
+        if (points.size() <= 4)
         {
+            // replace by ellipse
+            roi = new ROI2DEllipse(roi.getBounds2D());
+            
             points.clear();
             
             // convert the ROI into a linked list of points
@@ -470,7 +462,7 @@ public class Polygon2D extends ActiveContour
         
         // compute the interior mean intensity
         double inSum = 0, inCpt = 0;
-        //double outSum = 0, outCpt = 0;
+        // double outSum = 0, outCpt = 0;
         Point3d minBounds = new Point3d();
         Point3d maxBounds = new Point3d();
         boundingBox.getLower(minBounds);
@@ -679,7 +671,7 @@ public class Polygon2D extends ActiveContour
         // sensitivity = sensitivity * cin / (0.01 + cout);
         // sensitivity = sensitivity / (2 * Math.max(cout, cin));
         // sensitivity = sensitivity / (Math.log10(cin / cout));
-
+        
         Point3d p;
         Vector3d f, norm, cvms = new Vector3d();
         double val, inDiff, outDiff, sum;
@@ -1666,7 +1658,7 @@ public class Polygon2D extends ActiveContour
                     {
                         for (int i = start; i < end; i++, offset++)
                         {
-                            //if (start < 0 || end >= sizeY) continue;
+                            // if (start < 0 || end >= sizeY) continue;
                             Array1DUtil.setValue(_mask, offset, value);
                         }
                     }
