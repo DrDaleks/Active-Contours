@@ -3,7 +3,6 @@ package plugins.adufour.activecontours;
 import icy.image.IcyBufferedImage;
 import icy.main.Icy;
 import icy.math.ArrayMath;
-import icy.math.Scaler;
 import icy.painter.Overlay;
 import icy.painter.Overlay.OverlayPriority;
 import icy.roi.BooleanMask2D;
@@ -1221,8 +1220,8 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             ActiveContour contour = (ActiveContour) segment.getDetectionAtTime(t);
             if (contour == null) continue;
             
-            System.out.println("Surface: " + contour.getDimension(1));
-            System.out.println("Volume: " + contour.getDimension(2));
+            // temporary fix: indicate correct surface area in the console
+            if (contour instanceof Mesh3D) System.out.print("Mesh #" + i + ": surface area = " + contour.getDimension(1));
             
             volumes.put(segment, contour.getDimension(2));
             
