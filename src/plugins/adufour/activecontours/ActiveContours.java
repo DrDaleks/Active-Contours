@@ -3,6 +3,7 @@ package plugins.adufour.activecontours;
 import icy.image.IcyBufferedImage;
 import icy.main.Icy;
 import icy.math.ArrayMath;
+import icy.math.Scaler;
 import icy.painter.Overlay;
 import icy.painter.Overlay.OverlayPriority;
 import icy.roi.BooleanMask2D;
@@ -68,6 +69,7 @@ import plugins.fab.trackmanager.TrackSegment;
 import plugins.kernel.roi.roi2d.ROI2DArea;
 import plugins.kernel.roi.roi2d.ROI2DRectangle;
 import plugins.kernel.roi.roi3d.ROI3DArea;
+import plugins.kernel.roi.roi3d.ROI3DStack;
 import plugins.nchenouard.spot.Detection;
 
 public class ActiveContours extends EzPlug implements EzStoppable, Block
@@ -233,15 +235,6 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         
         evolution.addEzComponent(evolution_bounds, contour_resolution, contour_timeStep, convergence_winSize, convergence_operation, convergence_criterion, convergence_nbIter);
         addEzComponent(evolution);
-        
-        // contour_resolution.addVarChangeListener(new EzVarListener<Double>()
-        // {
-        // @Override
-        // public void variableChanged(EzVar<Double> source, Double newValue)
-        // {
-        // convergence_winSize.setValue((int) (100.0 / newValue));
-        // }
-        // });
         
         // output
         output_rois.setToolTipText("Select whether and where to export the contours as ROI for further quantification");
@@ -470,7 +463,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         }
         catch (ConvolutionException e)
         {
-            throw new EzException("Cannot smooth the signal: " + e.getMessage(), true);
+            System.err.println("Warning: error while smoothing the signal: " + e.getMessage());
         }
         
         // 1) Initialize the edge data
@@ -640,11 +633,10 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                             for (BooleanMask2D comp : components)
                             {
                                 ROI2DArea roi = new ROI2DArea(comp);
+                                roi.setZ(realZ);
+                                
                                 final SlidingWindow window = new SlidingWindow(convergence_winSize.getValue());
                                 final ActiveContour contour = new Polygon2D(contour_resolution, window, roi);
-                                contour.setX(roi.getBounds2D().getCenterX());
-                                contour.setY(roi.getBounds2D().getCenterY());
-                                contour.setZ(realZ);
                                 contour.setT(t);
                                 
                                 TrackSegment segment = new TrackSegment();
@@ -775,13 +767,20 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         
         Sequence boundSource = evolution_bounds.getValue();
         
-        if (boundSource == null || !boundSource.getDimension2D().equals(inputData.getDimension2D()) || boundSource.getROI2Ds().size() == 0)
+        if (boundSource != null && boundSource.getROIs().size() > 0)
+        {
+            field = ROIUtil.merge(boundSource.getROIs(), BooleanOperator.OR);
+        }
+        else if (inputData.getSizeZ() == 1)
         {
             field = new ROI2DRectangle(0, 0, inputData.getWidth(), inputData.getHeight());
         }
         else
         {
-            field = ROIUtil.merge(boundSource.getROIs(), BooleanOperator.OR);
+            ROI3DStack<ROI2DRectangle> field3D = new ROI3DStack<ROI2DRectangle>(ROI2DRectangle.class);
+            for (int z = 0; z < inputData.getSizeZ(); z++)
+                field3D.setSlice(z, new ROI2DRectangle(0, 0, inputData.getWidth(), inputData.getHeight()));
+            field = field3D;
         }
         
         int iter = 0;
@@ -1111,6 +1110,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             synchronized (region_cin)
             {
                 region_cin.put(segment, cin);
+                // System.out.print("in: " + cin);
             }
         }
         else
@@ -1185,14 +1185,18 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             TrackSegment segment = trackGroup.getTrackSegmentWithDetection(contour);
             if (contour instanceof Polygon2D)
             {
-                region_cout.put(segment, outs[(int) Math.round(contour.getZ())]);
+                double cout = outs[(int) Math.round(contour.getZ())];
+                region_cout.put(segment, cout);
+                // System.out.println("  out: " + cout);
             }
             else
             {
                 double cout = ArrayMath.mean(outs);
                 region_cout.put(segment, cout);
+                // System.out.println("  out: " + cout);
             }
         }
+        
     }
     
     private void storeResult(int t)
@@ -1217,15 +1221,25 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             ActiveContour contour = (ActiveContour) segment.getDetectionAtTime(t);
             if (contour == null) continue;
             
+            System.out.println("Surface: " + contour.getDimension(1));
+            System.out.println("Volume: " + contour.getDimension(2));
+            
             volumes.put(segment, contour.getDimension(2));
             
             // output as ROIs
-            ROI roi = contour.toROI(output_roiType.getValue(), inputData);
-            if (roi != null)
+            try
             {
-                roi.setName("Object #" + StringUtil.toString(i, nbPaddingDigits + 1));
-                roi.setColor(contour.getColor());
-                rois.add(roi);
+                ROI roi = contour.toROI(output_roiType.getValue(), inputData);
+                if (roi != null)
+                {
+                    roi.setName("Object #" + StringUtil.toString(i, nbPaddingDigits + 1));
+                    roi.setColor(contour.getColor());
+                    rois.add(roi);
+                }
+            }
+            catch (UnsupportedOperationException unsupported)
+            {
+                throw new IcyHandledException("3D meshes cannot be exported as polygons (yet). Please select \"Area\" instead.");
             }
             // raster data
             // contour.toSequence(binSeq, i);
