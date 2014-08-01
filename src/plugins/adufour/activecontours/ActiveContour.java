@@ -22,7 +22,7 @@ import plugins.nchenouard.spot.Detection;
  */
 public abstract class ActiveContour extends Detection implements Iterable<Point3d>
 {
-    protected final Processor      processor        = new Processor(SystemUtil.getAvailableProcessors() * 2);
+    protected final Processor      processor      = new Processor(SystemUtil.getAvailableProcessors() * 2);
     
     protected final SlidingWindow  convergence;
     
@@ -235,8 +235,10 @@ public abstract class ActiveContour extends Detection implements Iterable<Point3
      *            a sequence which can be used to retrieve the pixel size (may be needed if the
      *            contour is defined in real units rather than pixel units)
      * @return a ROI representing the contour
+     * @throws UnsupportedOperationException
+     *             if the contour cannot be exported in the requested type
      */
-    public abstract ROI toROI(ROIType type, Sequence sequence);
+    public abstract ROI toROI(ROIType type, Sequence sequence) throws UnsupportedOperationException;
     
     /**
      * Paints the contour onto the specified sequence with the specified value
