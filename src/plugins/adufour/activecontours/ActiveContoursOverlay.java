@@ -35,7 +35,6 @@ public class ActiveContoursOverlay extends Overlay
             
             if (segment == null) continue;
             
-            // try
             for (int d = 0; d < segment.getDetectionList().size(); d++)
             {
                 ActiveContour contour = (ActiveContour) segment.getDetectionList().get(d);
@@ -51,12 +50,6 @@ public class ActiveContoursOverlay extends Overlay
                     
                     float x = (float) contour.getX();
                     float y = (float) contour.getY();
-                    if (contour instanceof Mesh3D)
-                    {
-                        // convert real coordinates back into pixel coordinates
-                        x /= (float) sequence.getPixelSizeX();
-                        y /= (float) sequence.getPixelSizeY();
-                    }
                     
                     // adjust the text positioning
                     x -= (i < 10 ? f / 2 : f);
@@ -65,11 +58,6 @@ public class ActiveContoursOverlay extends Overlay
                     g.drawString("" + i, x, y);
                 }
             }
-            // catch (ConcurrentModificationException e)
-            // {
-            // // segment has probably changed while looking for a detection to paint
-            // // => ignore and wait for the next repaint
-            // }
         }
         
     }
