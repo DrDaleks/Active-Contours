@@ -734,13 +734,13 @@ public class Mesh3D extends ActiveContour
                         
                         for (int cross = 0; cross < nbCrosses; cross += 2)
                         {
-                            int start = intersections.get(cross);
-                            int stop = intersections.get(cross + 1);
+                            int start = intersections.get(cross) + lineOffset;
+                            int stop = intersections.get(cross + 1) + lineOffset;
                             
-                            for (int i = start; i < stop; i++)
+                            localInCpt += (stop - start);
+                            
+                            for (int offset = start; offset < stop; offset++)
                             {
-                                localInCpt++;
-                                int offset = i + lineOffset;
                                 localInSum += dataSlice[offset];
                                 if (maskSlice != null) maskSlice[offset] = 1;
                             }
@@ -866,11 +866,7 @@ public class Mesh3D extends ActiveContour
         // sensitivity = sensitivity / (Math.log10(cin / cout));
         
         double val, inDiff, outDiff, sum;
-        
-        int width = imageData.getSizeX();
-        int height = imageData.getSizeY();
-        int depth = imageData.getSizeZ();
-        
+                
         for (Vertex v : vertices)
         {
             if (v == null) continue;
@@ -878,9 +874,6 @@ public class Mesh3D extends ActiveContour
             Point3d p = v.position;
             
             // bounds check
-            if (p.x < 1 || p.x >= width - 1) continue;
-            if (p.y < 1 || p.y >= height - 1) continue;
-            if (p.z < 1 || p.z >= depth - 1) continue;
             
             val = getPixelValue(imageData, p.x, p.y, p.z);
             
@@ -1055,21 +1048,21 @@ public class Mesh3D extends ActiveContour
     @Override
     public double getX()
     {
-        // get this is pixel units
+        // get this in pixel units
         return super.getX() / pixelSizeXY;
     }
     
     @Override
     public double getY()
     {
-        // get this is pixel units
+        // get this in pixel units
         return super.getY() / pixelSizeXY;
     }
     
     @Override
     public double getZ()
     {
-        // get this is pixel units
+        // get this in pixel units
         return super.getZ() / pixelSizeZ;
     }
     
@@ -1200,9 +1193,9 @@ public class Mesh3D extends ActiveContour
         int height = data.getSizeY();
         int depth = data.getSizeZ();
         
-        x /= data.getPixelSizeX();
-        y /= data.getPixelSizeY();
-        z /= data.getPixelSizeZ();
+        x /= pixelSizeXY;
+        y /= pixelSizeXY;
+        z /= pixelSizeZ;
         
         final int i = (int) Math.floor(x);
         final int j = (int) Math.floor(y);
@@ -1317,7 +1310,7 @@ public class Mesh3D extends ActiveContour
             if (v == null) continue;
             
             // apply model forces if p lies within the area of interest
-            if (field != null && field.contains(v.position.x, v.position.y, 0, 0, 0)) force.set(v.drivingForces);
+            if (field != null && field.contains(v.position.x / pixelSizeXY, v.position.y / pixelSizeXY, v.position.z / pixelSizeZ, 0, 0)) force.set(v.drivingForces);
             
             // apply feedback forces all the time
             force.add(v.feedbackForces);
