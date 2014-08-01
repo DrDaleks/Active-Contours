@@ -8,6 +8,7 @@ import icy.roi.BooleanMask2D;
 import icy.roi.ROI;
 import icy.roi.ROI2D;
 import icy.sequence.Sequence;
+import icy.system.IcyHandledException;
 import icy.type.DataType;
 import icy.type.collection.array.Array1DUtil;
 
@@ -32,7 +33,6 @@ import javax.vecmath.Point3d;
 import javax.vecmath.Vector3d;
 
 import plugins.adufour.activecontours.ActiveContours.ROIType;
-import plugins.adufour.ezplug.EzException;
 import plugins.adufour.ezplug.EzVarDouble;
 import plugins.adufour.morphology.FillHolesInROI;
 import plugins.kernel.roi.roi2d.ROI2DArea;
@@ -118,10 +118,6 @@ public class Polygon2D extends ActiveContour
     {
         this(contour.resolution, new SlidingWindow(contour.convergence.getSize()));
         
-        setX(contour.x);
-        setY(contour.y);
-        setZ(contour.z);
-        
         setColor(contour.getColor());
         int n = contour.points.size();
         
@@ -136,6 +132,7 @@ public class Polygon2D extends ActiveContour
         
         updateNormals();
         
+        // artifically grow the contour by a tiny bit
         for (int i = 0; i < n; i++)
         {
             Point3d p = points.get(i);
@@ -152,10 +149,8 @@ public class Polygon2D extends ActiveContour
         
         if (!(roi instanceof ROI2DEllipse) && !(roi instanceof ROI2DRectangle) && !(roi instanceof ROI2DPolygon) && !(roi instanceof ROI2DArea))
         {
-            throw new EzException("Active contours: the input ROI is not valid. Only Rectangle, Ellipse, Polygon and Area are supported", true);
+            throw new IcyHandledException("Active contours: invalid ROI. Only Rectangle, Ellipse, Polygon and Area are supported");
         }
-        
-        setZ(roi.getZ());
         
         if (roi instanceof ROI2DArea)
         {
@@ -172,7 +167,13 @@ public class Polygon2D extends ActiveContour
             }
             catch (TopologyException e)
             {
+                int z = roi.getZ();
+                int t = roi.getT();
+                int c = roi.getC();
                 roi = new ROI2DEllipse(roi.getBounds2D());
+                roi.setZ(z);
+                roi.setT(t);
+                roi.setC(c);
             }
             
         }
@@ -180,7 +181,13 @@ public class Polygon2D extends ActiveContour
         if (points.size() <= 4)
         {
             // replace by ellipse
+            int z = roi.getZ();
+            int t = roi.getT();
+            int c = roi.getC();
             roi = new ROI2DEllipse(roi.getBounds2D());
+            roi.setZ(z);
+            roi.setT(t);
+            roi.setC(c);
             
             points.clear();
             
@@ -193,13 +200,13 @@ public class Polygon2D extends ActiveContour
             // first segment is necessarily a "move to" operation
             
             pathIterator.currentSegment(segment);
-            addPoint(new Point3d(segment[0], segment[1], 0));
+            addPoint(new Point3d(segment[0], segment[1], z));
             
             while (!pathIterator.isDone())
             {
                 if (pathIterator.currentSegment(segment) == PathIterator.SEG_LINETO)
                 {
-                    addPoint(new Point3d(segment[0], segment[1], 0));
+                    addPoint(new Point3d(segment[0], segment[1], z));
                 }
                 pathIterator.next();
                 
@@ -221,9 +228,10 @@ public class Polygon2D extends ActiveContour
                 }
             }
             
-            updateMetaData();
             counterClockWise = (getAlgebraicInterior() > 0);
         }
+        
+        updateMetaData();
     }
     
     protected int addPoint(Point3d p)
@@ -454,7 +462,7 @@ public class Polygon2D extends ActiveContour
         // if (!imageData_float.getBounds2D().contains(path.getBounds())) return 0.0;
         
         int myZ = (int) Math.round(getZ());
-        float[] _data = imageData_float.getDataXYAsFloat(myZ, 0, channel);
+        float[] _data = imageData_float.getDataXYAsFloat(0, myZ, channel);
         short[] _mask = buffer_data == null ? null : buffer_data.getDataXYAsShort(0, myZ, 0);
         
         int sizeX = imageData_float.getWidth();
@@ -896,6 +904,10 @@ public class Polygon2D extends ActiveContour
         BooleanMask2D m2 = roi.getBooleanMask(true);
         ROI2DArea r2 = new ROI2DArea(m2);
         
+        r2.setT(roi.getT());
+        r2.setZ(roi.getZ());
+        r2.setC(roi.getC());
+        
         r2.beginUpdate();
         
         for (Point p : m2.getContourPoints())
@@ -1255,7 +1267,7 @@ public class Polygon2D extends ActiveContour
                 if (distance < minLength)
                 {
                     noChange = false;
-                    pt2.set((pt1.x + pt2.x) * 0.5, (pt1.y + pt2.y) * 0.5, 0);
+                    pt2.set((pt1.x + pt2.x) * 0.5, (pt1.y + pt2.y) * 0.5, (pt1.z + pt2.z) * 0.5);
                     points.remove(i);
                     i--; // comes down to i-1+1 when looping
                     n--;
@@ -1264,7 +1276,7 @@ public class Polygon2D extends ActiveContour
                 {
                     noChange = false;
                     
-                    points.add(i + 1, new Point3d((pt1.x + pt2.x) * 0.5, (pt1.y + pt2.y) * 0.5, 0));
+                    points.add(i + 1, new Point3d((pt1.x + pt2.x) * 0.5, (pt1.y + pt2.y) * 0.5, (pt1.z + pt2.z) * 0.5));
                     i++; // comes down to i+=2 when looping
                     n++;
                 }
@@ -1277,14 +1289,14 @@ public class Polygon2D extends ActiveContour
             if (pt1.distance(pt2) < minLength)
             {
                 noChange = false;
-                pt2.set((pt1.x + pt2.x) * 0.5, (pt1.y + pt2.y) * 0.5, 0);
+                pt2.set((pt1.x + pt2.x) * 0.5, (pt1.y + pt2.y) * 0.5, (pt1.z + pt2.z) * 0.5);
                 points.remove(n - 1);
                 n--;
             }
             else if (pt1.distance(pt2) > maxLength)
             {
                 noChange = false;
-                points.add(new Point3d((pt1.x + pt2.x) * 0.5, (pt1.y + pt2.y) * 0.5, 0));
+                points.add(new Point3d((pt1.x + pt2.x) * 0.5, (pt1.y + pt2.y) * 0.5, (pt1.z + pt2.z) * 0.5));
                 n++;
             }
         }
@@ -1458,6 +1470,7 @@ public class Polygon2D extends ActiveContour
         {
             p.x += bounds.x;
             p.y += bounds.y;
+            p.z = roi.getZ();
             addPoint(p);
         }
         
