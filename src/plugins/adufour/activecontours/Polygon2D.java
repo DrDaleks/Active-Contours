@@ -463,6 +463,8 @@ public class Polygon2D extends ActiveContour
         
         int myZ = (int) Math.round(getZ());
         float[] _data = imageData_float.getDataXYAsFloat(0, myZ, channel);
+        if (_data == null) throw new IllegalArgumentException("Contour.getZ() = " + getZ() + "; Stack size = " + imageData_float.getSizeZ());
+        
         short[] _mask = buffer_data == null ? null : buffer_data.getDataXYAsShort(0, myZ, 0);
         
         int sizeX = imageData_float.getWidth();
@@ -687,7 +689,10 @@ public class Polygon2D extends ActiveContour
         
         int width = imageData.getWidth();
         int height = imageData.getHeight();
-        float[] data = imageData.getDataXYAsFloat(0, (int) Math.round(getZ()), channel);
+        
+        int myZ = (int) Math.round(getZ());
+        float[] _data = imageData.getDataXYAsFloat(0, myZ, channel);
+        if (_data == null) throw new IllegalArgumentException("Contour.getZ() = " + getZ() + "; Stack size = " + imageData.getSizeZ());
         
         for (int i = 0; i < n; i++)
         {
@@ -698,7 +703,7 @@ public class Polygon2D extends ActiveContour
             // bounds check
             // if (p.x <= 1 || p.y <= 1 || p.x >= width - 2 || p.y >= height - 2) continue;
             
-            val = getPixelValue(data, width, height, p.x, p.y);
+            val = getPixelValue(_data, width, height, p.x, p.y);
             
             inDiff = val - cin;
             inDiff *= inDiff;
