@@ -934,14 +934,6 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                         
                         if (region_weight.getValue() > EPSILON)
                         {
-                            if (!region_cin.containsKey(segment))
-                            {
-                                region_cin.put(segment, contour.computeAverageIntensity(region_data, 0, contourMask_buffer));
-                            }
-                            if (!region_cout.containsKey(segment))
-                            {
-                                region_cout.put(segment, 0.0);
-                            }
                             contour.computeRegionForces(region_data, 0, region_weight.getValue(), region_sensitivity.getValue(), region_cin.get(segment), region_cout.get(segment));
                         }
                         
@@ -1083,9 +1075,11 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 }
             }
         }
+        
+        if (change.getValue() && region_weight.getValue() > EPSILON) updateRegionInformation(allContours, t);
     }
     
-    private void updateRegionInformation(HashSet<ActiveContour> contours, int t)
+    private void updateRegionInformation(final HashSet<ActiveContour> contours, int t)
     {
         ArrayList<Future<?>> tasks = new ArrayList<Future<?>>(contours.size());
         
@@ -1097,11 +1091,18 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             // only update on the first contour of the segment (first time point)
             // if (segment.getFirstDetection() != contour) return;
             
-            double cin = contour.computeAverageIntensity(region_data, 0, contourMask_buffer);
-            synchronized (region_cin)
+            try
             {
-                region_cin.put(segment, cin);
-                // System.out.print("in: " + cin);
+                double cin = contour.computeAverageIntensity(region_data, 0, contourMask_buffer);
+                synchronized (region_cin)
+                {
+                    region_cin.put(segment, cin);
+                    // System.out.print("in: " + cin);
+                }
+            }
+            catch (TopologyException topo)
+            {
+                contours.remove(contour);
             }
         }
         else
@@ -1116,10 +1117,17 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                         // only update on the first contour of the segment (first time point)
                         // if (segment.getFirstDetection() != contour) return;
                         
-                        double cin = contour.computeAverageIntensity(region_data, 0, contourMask_buffer);
-                        synchronized (region_cin)
+                        try
                         {
-                            region_cin.put(segment, cin);
+                            double cin = contour.computeAverageIntensity(region_data, 0, contourMask_buffer);
+                            synchronized (region_cin)
+                            {
+                                region_cin.put(segment, cin);
+                            }
+                        }
+                        catch (TopologyException topo)
+                        {
+                            contours.remove(contour);
                         }
                     }
                 }));

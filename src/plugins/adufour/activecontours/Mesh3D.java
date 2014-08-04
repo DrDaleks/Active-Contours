@@ -599,7 +599,7 @@ public class Mesh3D extends ActiveContour
     }
     
     @Override
-    public double computeAverageIntensity(Sequence imageData_float, int channel, Sequence buffer_data)
+    public double computeAverageIntensity(Sequence imageData_float, int channel, Sequence buffer_data) throws TopologyException
     {
         double inSum = 0, inCpt = 0;
         
@@ -629,7 +629,7 @@ public class Mesh3D extends ActiveContour
         // epsilon used for the line-triangle intersection test
         final double epsilon = 1.0e-13;
         
-        ArrayList<Future<double[]>> sliceTasks = new ArrayList<Future<double[]>>(maxZ - minZ + 1);
+        ArrayList<Future<double[]>> sliceTasks = new ArrayList<Future<double[]>>();
         
         for (int k = minZ; k <= maxZ; k++)
         {
@@ -775,8 +775,8 @@ public class Mesh3D extends ActiveContour
         
         if (inCpt == 0)
         {
-            // no voxel inside the mesh => mesh is becoming extremely flat
             System.err.println("Warning: flat mesh detected (probably on the volume edge)");
+            throw new TopologyException(this, null);
         }
         
         return inSum / inCpt;

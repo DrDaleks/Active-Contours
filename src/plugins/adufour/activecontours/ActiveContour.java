@@ -152,8 +152,11 @@ public abstract class ActiveContour extends Detection implements Iterable<Point3
      * @param buffer
      *            the binary mask buffer where this contour should be rasterised
      * @return the average intensity inside the contour
+     * @throws TopologyException
+     *             if the contour becomes extremely thin to the point where it contains no pixel to
+     *             measure intensity
      */
-    public abstract double computeAverageIntensity(Sequence imageData, int channel, Sequence buffer);
+    public abstract double computeAverageIntensity(Sequence imageData, int channel, Sequence buffer) throws TopologyException;
     
     /**
      * Tests whether the given point is inside the contour, and if so returns the penetration depth
