@@ -1300,6 +1300,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         });
         
         // inputMap.add("minimum object size", contour_minArea.getVariable());
+        evolution_bounds.getVariable().setNoSequenceSelection();
         inputMap.add("region bounds", evolution_bounds.getVariable());
         inputMap.add("time step", contour_timeStep.getVariable());
         // inputMap.add("convergence window size", convergence_winSize.getVariable());
