@@ -2064,6 +2064,7 @@ public class Mesh3D extends ActiveContour
             }
             
             r3.endUpdate();
+            r3.setT(t);
             return r3;
             
         default:
