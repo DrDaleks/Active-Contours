@@ -52,6 +52,8 @@ public class ReSampler implements Callable<Boolean>
             // this is a thread-safe version of TrackGroup.getTrackSegmentWithDetection(Detection)
             for (TrackSegment segment : new ArrayList<TrackSegment>(trackGroup.getTrackSegmentList()))
             {
+                if (segment == null) continue; // FIXME Fabrice: how could this happen?
+                
                 if (segment.containsDetection(contour))
                 {
                     currentSegment = segment;
