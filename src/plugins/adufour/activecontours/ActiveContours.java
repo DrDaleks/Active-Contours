@@ -59,6 +59,7 @@ import plugins.adufour.filtering.Convolution1D;
 import plugins.adufour.filtering.ConvolutionException;
 import plugins.adufour.filtering.Kernels1D;
 import plugins.adufour.hierarchicalkmeans.HierarchicalKMeans;
+import plugins.adufour.vars.lang.Var;
 import plugins.adufour.vars.lang.VarBoolean;
 import plugins.adufour.vars.lang.VarROIArray;
 import plugins.adufour.vars.util.VarException;
@@ -134,8 +135,8 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                                                                             {
                                                                                 public void run()
                                                                                 {
-                                                                                    if (trackGroup == null) return;
-                                                                                    if (trackGroup.getTrackSegmentList().isEmpty()) return;
+                                                                                    if (trackGroup.getValue() == null) return;
+                                                                                    if (trackGroup.getValue().getTrackSegmentList().isEmpty()) return;
                                                                                     
                                                                                     Icy.getMainInterface().getSwimmingPool().add(new SwimmingObject(trackGroup));
                                                                                     TrackManager tm = new TrackManager();
@@ -158,7 +159,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     
     private boolean                             globalStop;
     
-    private TrackGroup                          trackGroup;
+    private Var<TrackGroup>                     trackGroup          = new Var<TrackGroup>("Tracks", TrackGroup.class);
     
     private ActiveContoursOverlay               overlay;
     
@@ -171,7 +172,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     
     public TrackGroup getTrackGroup()
     {
-        return trackGroup;
+        return trackGroup.getValue();
     }
     
     @Override
@@ -265,8 +266,8 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         int startT = inputData.getFirstViewer() == null ? 0 : inputData.getFirstViewer().getPositionT();
         int endT = tracking.getValue() ? inputData.getSizeT() - 1 : startT;
         
-        trackGroup = new TrackGroup(inputData);
-        trackGroup.setDescription("Active contours (" + new Date().toString() + ")");
+        trackGroup.setValue(new TrackGroup(inputData));
+        trackGroup.getValue().setDescription("Active contours (" + new Date().toString() + ")");
         
         if (!Icy.getMainInterface().isHeadLess())
         {
@@ -274,7 +275,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             for (Overlay overlay : inputData.getOverlays())
                 if (overlay instanceof ActiveContoursOverlay) overlay.remove();
             
-            overlay = new ActiveContoursOverlay(trackGroup);
+            overlay = new ActiveContoursOverlay(trackGroup.getValue());
             overlay.setPriority(OverlayPriority.TOPMOST);
             inputData.addOverlay(overlay);
         }
@@ -351,7 +352,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 }
                 
                 // 1) duplicate contours from the previous frame
-                for (TrackSegment segment : trackGroup.getTrackSegmentList())
+                for (TrackSegment segment : trackGroup.getValue().getTrackSegmentList())
                 {
                     Detection previous = segment.getDetectionAtTime(t);
                     
@@ -385,7 +386,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                         segment.addDetection(contour);
                         synchronized (trackGroup)
                         {
-                            trackGroup.addTrackSegment(segment);
+                            trackGroup.getValue().addTrackSegment(segment);
                         }
                         synchronized (region_cin)
                         {
@@ -525,7 +526,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         else
         {
             // 1) duplicate contours from the previous frame
-            for (TrackSegment segment : trackGroup.getTrackSegmentList())
+            for (TrackSegment segment : trackGroup.getValue().getTrackSegmentList())
             {
                 Detection previous = segment.getDetectionAtTime(t - 1);
                 
@@ -593,16 +594,15 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         {
             if (roi instanceof ROI2D)
             {
-                final ROI2D roi2d = (ROI2D) roi;
+                final ROI2D roi2d = (ROI2D) roi.getCopy();
                 
-                final int realZ;
                 if (roi2d.getZ() == -1)
                 {
                     // a 2D contour cannot be created from a "virtually 3D" ROI,
                     // merely a slice of it => which one?
                     if (getUI() != null)
                     {
-                        realZ = inputData.getFirstViewer().getPositionZ();
+                        roi2d.setZ(inputData.getFirstViewer().getPositionZ());
                     }
                     else
                     {
@@ -610,12 +610,8 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                         {
                             System.err.println("WARNING: cannot create a 2D contour from a ROI of infinite Z dimension, will use Z=0");
                         }
-                        realZ = 0;
+                        roi2d.setZ(0);
                     }
-                }
-                else
-                {
-                    realZ = roi2d.getZ();
                 }
                 
                 Runnable initializer = new Runnable()
@@ -632,7 +628,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                             for (BooleanMask2D comp : components)
                             {
                                 ROI2DArea roi = new ROI2DArea(comp);
-                                roi.setZ(realZ);
+                                roi.setZ(roi2d.getZ());
                                 
                                 final SlidingWindow window = new SlidingWindow(convergence_winSize.getValue());
                                 final ActiveContour contour = new Polygon2D(contour_resolution, window, roi);
@@ -642,7 +638,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                                 segment.addDetection(contour);
                                 synchronized (trackGroup)
                                 {
-                                    trackGroup.addTrackSegment(segment);
+                                    trackGroup.getValue().addTrackSegment(segment);
                                 }
                                 synchronized (region_cin)
                                 {
@@ -658,16 +654,12 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                         {
                             final SlidingWindow window = new SlidingWindow(convergence_winSize.getValue());
                             final ActiveContour contour = new Polygon2D(contour_resolution, window, roi2d);
-                            contour.setX(roi2d.getBounds2D().getCenterX());
-                            contour.setY(roi2d.getBounds2D().getCenterY());
-                            contour.setZ(realZ);
-                            contour.setT(t);
                             
                             TrackSegment segment = new TrackSegment();
                             segment.addDetection(contour);
                             synchronized (trackGroup)
                             {
-                                trackGroup.addTrackSegment(segment);
+                                trackGroup.getValue().addTrackSegment(segment);
                             }
                             synchronized (region_cin)
                             {
@@ -698,8 +690,8 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                             
                             final SlidingWindow window = new SlidingWindow(convergence_winSize.getValue());
                             final ActiveContour contour = new Mesh3D(inputData.getPixelSizeX(), inputData.getPixelSizeZ(), contour_resolution, window, r3);
-                            contour.setX(r3.getBounds3D().getCenterX());
-                            contour.setY(r3.getBounds3D().getCenterY());
+                            // contour.setX(r3.getBounds3D().getCenterX());
+                            // contour.setY(r3.getBounds3D().getCenterY());
                             contour.setT(t);
                             
                             // contour.toSequence(inputData, 3000);
@@ -708,7 +700,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                             segment.addDetection(contour);
                             synchronized (trackGroup)
                             {
-                                trackGroup.addTrackSegment(segment);
+                                trackGroup.getValue().addTrackSegment(segment);
                             }
                             synchronized (region_cin)
                             {
@@ -751,9 +743,9 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     public void evolveContours(final int t)
     {
         // retrieve the contours on the current frame and store them in currentContours
-        final HashSet<ActiveContour> allContours = new HashSet<ActiveContour>(trackGroup.getTrackSegmentList().size());
+        final HashSet<ActiveContour> allContours = new HashSet<ActiveContour>(trackGroup.getValue().getTrackSegmentList().size());
         
-        for (TrackSegment segment : trackGroup.getTrackSegmentList())
+        for (TrackSegment segment : trackGroup.getValue().getTrackSegmentList())
         {
             Detection det = segment.getDetectionAtTime(t);
             if (det != null) allContours.add((ActiveContour) det);
@@ -836,7 +828,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 for (ActiveContour contour : allContours)
                 {
                     // make sure this contour's statistics exist
-                    if (region_cout.containsKey(trackGroup.getTrackSegmentWithDetection(contour))) continue;
+                    if (region_cout.containsKey(trackGroup.getValue().getTrackSegmentWithDetection(contour))) continue;
                     
                     updateRegionStatistics = true;
                     break;
@@ -884,7 +876,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             // no multi-threading needed
             
             ActiveContour contour = evolvingContours.iterator().next();
-            TrackSegment segment = trackGroup.getTrackSegmentWithDetection(contour);
+            TrackSegment segment = trackGroup.getValue().getTrackSegmentWithDetection(contour);
             
             if (Math.abs(edge_weight.getValue()) > EPSILON)
             {
@@ -928,7 +920,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 {
                     public ActiveContour call()
                     {
-                        TrackSegment segment = trackGroup.getTrackSegmentWithDetection(contour);
+                        TrackSegment segment = trackGroup.getValue().getTrackSegmentWithDetection(contour);
                         
                         if (regul_weight.getValue() > EPSILON)
                         {
@@ -1045,7 +1037,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 if (iterator.hasNext())
                 {
                     ActiveContour contour = evolvingContours.iterator().next();
-                    ReSampler reSampler = new ReSampler(trackGroup, contour, evolvingContours, allContours);
+                    ReSampler reSampler = new ReSampler(trackGroup.getValue(), contour, evolvingContours, allContours);
                     if (reSampler.call())
                     {
                         change.setValue(true);
@@ -1058,7 +1050,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 ArrayList<ReSampler> tasks = new ArrayList<ReSampler>(evolvingContours.size());
                 
                 for (final ActiveContour contour : evolvingContours)
-                    tasks.add(new ReSampler(trackGroup, contour, evolvingContours, allContours));
+                    tasks.add(new ReSampler(trackGroup.getValue(), contour, evolvingContours, allContours));
                 
                 try
                 {
@@ -1100,7 +1092,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         if (contours.size() == 1)
         {
             ActiveContour contour = contours.iterator().next();
-            TrackSegment segment = trackGroup.getTrackSegmentWithDetection(contour);
+            TrackSegment segment = trackGroup.getValue().getTrackSegmentWithDetection(contour);
             
             // only update on the first contour of the segment (first time point)
             // if (segment.getFirstDetection() != contour) return;
@@ -1119,7 +1111,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 {
                     public void run()
                     {
-                        TrackSegment segment = trackGroup.getTrackSegmentWithDetection(contour);
+                        TrackSegment segment = trackGroup.getValue().getTrackSegmentWithDetection(contour);
                         
                         // only update on the first contour of the segment (first time point)
                         // if (segment.getFirstDetection() != contour) return;
@@ -1181,7 +1173,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         
         for (ActiveContour contour : contours)
         {
-            TrackSegment segment = trackGroup.getTrackSegmentWithDetection(contour);
+            TrackSegment segment = trackGroup.getValue().getTrackSegmentWithDetection(contour);
             if (contour instanceof Polygon2D)
             {
                 double cout = outs[(int) Math.round(contour.getZ())];
@@ -1200,7 +1192,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     
     private void storeResult(int t)
     {
-        ArrayList<TrackSegment> segments = trackGroup.getTrackSegmentList();
+        ArrayList<TrackSegment> segments = trackGroup.getValue().getTrackSegmentList();
         
         ArrayList<ROI> rois = null;
         // Append the current list to the existing one
@@ -1221,7 +1213,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             if (contour == null) continue;
             
             // temporary fix: indicate correct surface area in the console
-            if (contour instanceof Mesh3D) System.out.print("Mesh #" + i + ": surface area = " + contour.getDimension(1));
+            if (contour instanceof Mesh3D) System.out.println("Mesh #" + i + ": surface area = " + contour.getDimension(1));
             
             volumes.put(segment, contour.getDimension(2));
             
@@ -1300,8 +1292,8 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         });
         
         // inputMap.add("minimum object size", contour_minArea.getVariable());
-        evolution_bounds.getVariable().setNoSequenceSelection();
         inputMap.add("region bounds", evolution_bounds.getVariable());
+        evolution_bounds.getVariable().setNoSequenceSelection();
         inputMap.add("time step", contour_timeStep.getVariable());
         // inputMap.add("convergence window size", convergence_winSize.getVariable());
         inputMap.add("convergence value", convergence_criterion.getVariable());
@@ -1316,6 +1308,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     public void declareOutput(VarList outputMap)
     {
         outputMap.add(roiOutput);
+        outputMap.add(trackGroup);
     }
     
 }
