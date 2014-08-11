@@ -255,7 +255,7 @@ public class Polygon2D extends ActiveContour
         int i = 0, j = 0, n = points.size();
         Point3d p_i = null, p_j = null;
         
-        double divisionDistQ = boundingSphere.getRadius() * 0.5;
+        double divisionDistQ = boundingSphere.getRadius() * 0.1;
         divisionDistQ *= divisionDistQ;
         
         double minDistanceQ = minDistance;
