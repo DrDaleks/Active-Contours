@@ -138,7 +138,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                                                                                     if (trackGroup.getValue() == null) return;
                                                                                     if (trackGroup.getValue().getTrackSegmentList().isEmpty()) return;
                                                                                     
-                                                                                    Icy.getMainInterface().getSwimmingPool().add(new SwimmingObject(trackGroup));
+                                                                                    Icy.getMainInterface().getSwimmingPool().add(new SwimmingObject(trackGroup.getValue()));
                                                                                     TrackManager tm = new TrackManager();
                                                                                     tm.reOrganize();
                                                                                     tm.setDisplaySequence(inputData);
@@ -376,7 +376,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                     {
                         ROI2DArea roi = new ROI2DArea((ROI2DArea) cc.toROI());
                         final SlidingWindow window = new SlidingWindow(convergence_winSize.getValue());
-                        final ActiveContour contour = new Polygon2D(contour_resolution, window, roi);
+                        final ActiveContour contour = new Polygon2D(contour_resolution.getVariable(), window, roi);
                         contour.setX(roi.getBounds2D().getCenterX());
                         contour.setY(roi.getBounds2D().getCenterY());
                         contour.setZ(0);
@@ -500,7 +500,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 }
                 catch (ConvolutionException e)
                 {
-                    throw new EzException("Cannot smooth the signal: " + e.getMessage(), true);
+                    throw new EzException(this, "Cannot smooth the signal: " + e.getMessage(), true);
                 }
             }
         }
@@ -561,11 +561,11 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         
         if (roiInput.getValue().length == 0)
         {
-            if (isHeadLess()) throw new VarException("Active contours: no input ROI");
+            if (isHeadLess()) throw new VarException(roiInput, "Active contours: no input ROI");
             
             ArrayList<ROI> roiFromSequence = inputData.getROIs();
             
-            if (roiFromSequence.isEmpty()) throw new EzException("Please draw or select a ROI", true);
+            if (roiFromSequence.isEmpty()) throw new VarException(input.getVariable(), "Please draw or select a ROI");
             
             // only pick ROI in all or the current frame
             for (int i = 0; i < roiFromSequence.size(); i++)
@@ -631,7 +631,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                                 roi.setZ(roi2d.getZ());
                                 
                                 final SlidingWindow window = new SlidingWindow(convergence_winSize.getValue());
-                                final ActiveContour contour = new Polygon2D(contour_resolution, window, roi);
+                                final ActiveContour contour = new Polygon2D(contour_resolution.getVariable(), window, roi);
                                 contour.setT(t);
                                 
                                 TrackSegment segment = new TrackSegment();
@@ -653,7 +653,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                         else
                         {
                             final SlidingWindow window = new SlidingWindow(convergence_winSize.getValue());
-                            final ActiveContour contour = new Polygon2D(contour_resolution, window, roi2d);
+                            final ActiveContour contour = new Polygon2D(contour_resolution.getVariable(), window, roi2d);
                             
                             TrackSegment segment = new TrackSegment();
                             segment.addDetection(contour);
@@ -689,7 +689,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                             ROI3DArea area3D = (ROI3DArea) r3;
                             
                             final SlidingWindow window = new SlidingWindow(convergence_winSize.getValue());
-                            final ActiveContour contour = new Mesh3D(inputData.getPixelSizeX(), inputData.getPixelSizeZ(), contour_resolution, window, r3);
+                            final ActiveContour contour = new Mesh3D(inputData.getPixelSizeX(), inputData.getPixelSizeZ(), contour_resolution.getVariable(), window, r3);
                             // contour.setX(r3.getBounds3D().getCenterX());
                             // contour.setY(r3.getBounds3D().getCenterY());
                             contour.setT(t);
@@ -983,8 +983,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                     }
                     catch (ExecutionException e)
                     {
-                        e.printStackTrace();
-                        throw new RuntimeException(e);
+                        throw new RuntimeException(e.getCause());
                     }
             }
             catch (InterruptedException e)

@@ -13,6 +13,7 @@
     <selectedElements exportClassFiles="true" exportJavaFiles="true" exportOutputFolder="false">
         <javaElement handleIdentifier="=Active-Contours/src&lt;plugins.adufour.activecontours{ActiveContour.java"/>
         <javaElement handleIdentifier="=Active-Contours/src&lt;plugins.adufour.activecontours{ActiveContours.java"/>
+        <javaElement handleIdentifier="=Active-Contours/src&lt;plugins.adufour.activecontours{DeformationProfiler.java"/>
         <javaElement handleIdentifier="=Active-Contours/src&lt;plugins.adufour.activecontours{ReSampler.java"/>
         <javaElement handleIdentifier="=Active-Contours/src&lt;plugins.adufour.activecontours{SlidingWindow.java"/>
         <javaElement handleIdentifier="=Active-Contours/src&lt;plugins.adufour.activecontours{TopologyException.java"/>

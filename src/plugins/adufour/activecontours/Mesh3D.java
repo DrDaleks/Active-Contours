@@ -8,6 +8,7 @@ import icy.sequence.Sequence;
 import icy.type.DataType;
 import icy.type.collection.array.Array1DUtil;
 import icy.type.rectangle.Rectangle3D;
+import icy.util.XMLUtil;
 import icy.vtk.VtkUtil;
 
 import java.awt.BasicStroke;
@@ -15,6 +16,12 @@ import java.awt.Font;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
 import java.awt.geom.Rectangle2D;
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.io.StringReader;
+import java.io.StringWriter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -24,12 +31,14 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 
-import javax.media.j3d.BoundingBox;
 import javax.vecmath.Point3d;
 import javax.vecmath.Vector3d;
 
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+
 import plugins.adufour.activecontours.ActiveContours.ROIType;
-import plugins.adufour.ezplug.EzVarDouble;
+import plugins.adufour.vars.lang.Var;
 import plugins.kernel.canvas.VtkCanvas;
 import plugins.kernel.roi.roi2d.ROI2DArea;
 import plugins.kernel.roi.roi3d.ROI3DArea;
@@ -206,7 +215,7 @@ public class Mesh3D extends ActiveContour
         
         public final Vector3d           normal;
         
-        public double                   distanceToCenter = 0;
+//        public double                   distanceToCenter = 0;
         
         public Vertex(Vertex v)
         {
@@ -254,15 +263,23 @@ public class Mesh3D extends ActiveContour
         }
     }
     
-    final ArrayList<Face>           faces    = new ArrayList<Face>();
+    final ArrayList<Face>   faces    = new ArrayList<Face>();
     
-    private final ArrayList<Vertex> vertices = new ArrayList<Vertex>();
+    final ArrayList<Vertex> vertices = new ArrayList<Vertex>();
     
-    private VTKMesh                 vtkMesh  = null;
+    private VTKMesh         vtkMesh  = null;
     
-    private final double            pixelSizeXY;
+    private double          pixelSizeXY;
     
-    private final double            pixelSizeZ;
+    private double          pixelSizeZ;
+    
+    /**
+     * DO NOT USE! This constructor is for XML loading purposes only
+     */
+    public Mesh3D()
+    {
+        
+    }
     
     /**
      * Creates a clone of the specified contour
@@ -271,7 +288,7 @@ public class Mesh3D extends ActiveContour
      */
     public Mesh3D(Mesh3D contour)
     {
-        super(contour.resolution, new SlidingWindow(contour.convergence.getSize()));
+        super(contour.sampling, new SlidingWindow(contour.convergence.getSize()));
         
         pixelSizeXY = contour.pixelSizeXY;
         pixelSizeZ = contour.pixelSizeZ;
@@ -291,9 +308,9 @@ public class Mesh3D extends ActiveContour
             faces.add(new Face(f.v1, f.v2, f.v3));
     }
     
-    public Mesh3D(double pixelSizeXY, double pixelSizeZ, EzVarDouble contour_resolution, SlidingWindow convergenceWindow, ROI3D roi)
+    public Mesh3D(double pixelSizeXY, double pixelSizeZ, Var<Double> sampling, SlidingWindow convergenceWindow, ROI3D roi)
     {
-        super(contour_resolution, convergenceWindow);
+        super(sampling, convergenceWindow);
         
         this.pixelSizeXY = pixelSizeXY;
         this.pixelSizeZ = pixelSizeZ;
@@ -356,7 +373,7 @@ public class Mesh3D extends ActiveContour
             // the resolution is now stretched...
             double minResolution = (2 / PHI) * Math.min(r3.getSizeX() * pixelSizeXY, Math.min(r3.getSizeY() * pixelSizeXY, r3.getSizeZ() * pixelSizeZ));
             
-            while (minResolution > (2 * resolution.getValue()))
+            while (minResolution > (2 * sampling.getValue()))
             {
                 // do global subdivisions (faster)
                 subdivide();
@@ -377,9 +394,9 @@ public class Mesh3D extends ActiveContour
         }
     }
     
-    public Mesh3D(double pixelSizeXY, double pixelSizeZ, EzVarDouble resolution, SlidingWindow slidingWindow, ArrayList<Vertex> newVertices, ArrayList<Face> newFaces)
+    public Mesh3D(double pixelSizeXY, double pixelSizeZ, Var<Double> sampling, SlidingWindow slidingWindow, ArrayList<Vertex> newVertices, ArrayList<Face> newFaces)
     {
-        super(resolution, slidingWindow);
+        super(sampling, slidingWindow);
         
         this.pixelSizeXY = pixelSizeXY;
         this.pixelSizeZ = pixelSizeZ;
@@ -414,7 +431,7 @@ public class Mesh3D extends ActiveContour
                 continue;
             }
             
-            if (v.position.distanceSquared(point) < resolution.getValue() * 0.00001) return -index - 1;
+            if (v.position.distanceSquared(point) < sampling.getValue() * 0.00001) return -index - 1;
         }
         
         // if code runs until here, the vertex must be created
@@ -615,9 +632,8 @@ public class Mesh3D extends ActiveContour
         final double resZ = imageData_float.getPixelSizeZ();
         
         Point3d boxMin = new Point3d(), boxMax = new Point3d();
-        BoundingBox bbox = getBoundingBox();
-        bbox.getLower(boxMin);
-        bbox.getUpper(boxMax);
+        boundingBox.getLower(boxMin);
+        boundingBox.getUpper(boxMax);
         
         final int minX = Math.max(0, (int) Math.floor(boxMin.x / resX) - 1);
         final int minY = Math.max(0, (int) Math.floor(boxMin.y / resY) - 1);
@@ -866,7 +882,7 @@ public class Mesh3D extends ActiveContour
         // sensitivity = sensitivity / (Math.log10(cin / cout));
         
         double val, inDiff, outDiff, sum;
-                
+        
         for (Vertex v : vertices)
         {
             if (v == null) continue;
@@ -883,7 +899,7 @@ public class Mesh3D extends ActiveContour
             outDiff = val - cout;
             outDiff *= outDiff;
             
-            sum = weight * resolution.getValue() * (sensitivity * outDiff) - (inDiff / sensitivity);
+            sum = weight * sampling.getValue() * (sensitivity * outDiff) - (inDiff / sensitivity);
             
             v.drivingForces.scaleAdd(sum, v.normal, v.drivingForces);
         }
@@ -895,7 +911,7 @@ public class Mesh3D extends ActiveContour
     {
         Vector3d internalForce = new Vector3d();
         
-        weight /= resolution.getValue();
+        weight /= sampling.getValue();
         
         for (Vertex v : vertices)
         {
@@ -1045,25 +1061,28 @@ public class Mesh3D extends ActiveContour
         return crossCount % 2 == 1 ? penetration : 0;
     }
     
-    @Override
-    public double getX()
+    public double getCurvature(Point3d pt)
     {
-        // get this in pixel units
-        return super.getX() / pixelSizeXY;
-    }
-    
-    @Override
-    public double getY()
-    {
-        // get this in pixel units
-        return super.getY() / pixelSizeXY;
-    }
-    
-    @Override
-    public double getZ()
-    {
-        // get this in pixel units
-        return super.getZ() / pixelSizeZ;
+        for (Vertex v : vertices)
+        {
+            if (v == null) continue;
+            
+            if (!v.position.equals(pt)) continue;
+            
+            Vector3d sum = new Vector3d();
+            Vector3d diff = new Vector3d();
+            for (Integer n : v.neighbors)
+            {
+                Point3d neighbor = vertices.get(n).position;
+                diff.sub(neighbor, pt);
+                sum.add(diff);
+            }
+            sum.scale(1.0 / v.neighbors.size());
+            
+            return sum.length() * Math.signum(sum.dot(v.normal));
+        }
+        
+        return 0;
     }
     
     public double getDimension(int order)
@@ -1130,9 +1149,56 @@ public class Mesh3D extends ActiveContour
         }
     }
     
-    public Point3d getMassCenter()
+    Point3d getMassCenter()
     {
-        return new Point3d(getX(), getY(), getZ());
+        return new Point3d(x, y, z);
+    }
+    
+    /**
+     * Returns the minimum distance between all contour points and the specified point.
+     * 
+     * @param point
+     * @param closestPoint
+     *            an optional Point3d object that will be filled with the closest point
+     * @return
+     */
+    double getMinDistanceTo(Point3d point, Point3d closestPoint)
+    {
+        double dist = Double.MAX_VALUE;
+        
+        for (Point3d p : this)
+        {
+            if (p == null) continue;
+            
+            double d = p.distance(point);
+            
+            if (d < dist)
+            {
+                dist = d;
+                if (closestPoint != null) closestPoint.set(p);
+            }
+        }
+        
+        return dist;
+    }
+    
+    /**
+     * Returns the maximum distance between all contour points and the specified point
+     * 
+     * @param point
+     * @return
+     */
+    double getMaxDistanceTo(Point3d point)
+    {
+        double dist = 0;
+        
+        for (Point3d p : this)
+        {
+            double d = p.distance(point);
+            if (d > dist) dist = d;
+        }
+        
+        return dist;
     }
     
     /**
@@ -1236,18 +1302,24 @@ public class Mesh3D extends ActiveContour
     }
     
     @Override
-    protected void initFrom(ActiveContour contour)
+    public double getX()
     {
-        int n = 0;
-        for (Point3d p : contour)
-        {
-            addPoint(p);
-            x += p.x;
-            y += p.y;
-            n++;
-        }
-        x /= n;
-        y /= n;
+        // get this in pixel units
+        return super.getX() / pixelSizeXY;
+    }
+    
+    @Override
+    public double getY()
+    {
+        // get this in pixel units
+        return super.getY() / pixelSizeXY;
+    }
+    
+    @Override
+    public double getZ()
+    {
+        // get this in pixel units
+        return super.getZ() / pixelSizeZ;
     }
     
     @Override
@@ -1301,7 +1373,7 @@ public class Mesh3D extends ActiveContour
     void move(ROI field, double timeStep)
     {
         Vector3d force = new Vector3d();
-        double maxDisp = resolution.getValue() * timeStep;
+        double maxDisp = sampling.getValue() * timeStep;
         
         Point3d center = new Point3d();
         
@@ -1419,8 +1491,8 @@ public class Mesh3D extends ActiveContour
     @Override
     public void reSample(double minFactor, double maxFactor) throws TopologyException
     {
-        double minLength = resolution.getValue() * minFactor;
-        double maxLength = resolution.getValue() * maxFactor;
+        double minLength = sampling.getValue() * minFactor;
+        double maxLength = sampling.getValue() * maxFactor;
         
         // if there are 2 faces only in the mesh, it should be destroyed
         
@@ -1761,7 +1833,7 @@ public class Mesh3D extends ActiveContour
                     break;
                 }
             
-            Mesh3D newMesh = new Mesh3D(pixelSizeXY, pixelSizeZ, resolution, new SlidingWindow(convergence.getSize()), newVertices, newFaces);
+            Mesh3D newMesh = new Mesh3D(pixelSizeXY, pixelSizeZ, sampling, new SlidingWindow(convergence.getSize()), newVertices, newFaces);
             newMesh.setT(getT());
             
             if (newMesh.getDimension(0) > 4) children[child] = newMesh;
@@ -1911,9 +1983,8 @@ public class Mesh3D extends ActiveContour
             
             Point3d boxMin = new Point3d(),
             boxMax = new Point3d();
-            BoundingBox bbox = getBoundingBox();
-            bbox.getLower(boxMin);
-            bbox.getUpper(boxMax);
+            boundingBox.getLower(boxMin);
+            boundingBox.getUpper(boxMax);
             
             final int minX = (int) Math.floor(boxMin.x / resX) - 1;
             final int minY = (int) Math.floor(boxMin.y / resY) - 1;
@@ -2169,9 +2240,8 @@ public class Mesh3D extends ActiveContour
         final double resZ = output.getPixelSizeZ();
         
         Point3d boxMin = new Point3d(), boxMax = new Point3d();
-        BoundingBox bbox = getBoundingBox();
-        bbox.getLower(boxMin);
-        bbox.getUpper(boxMax);
+        boundingBox.getLower(boxMin);
+        boundingBox.getUpper(boxMax);
         
         final int minX = Math.max(0, (int) Math.floor(boxMin.x / resX) - 1);
         final int minY = Math.max(0, (int) Math.floor(boxMin.y / resY) - 1);
@@ -2312,6 +2382,177 @@ public class Mesh3D extends ActiveContour
         catch (ExecutionException e)
         {
             e.printStackTrace();
+        }
+    }
+    
+    @Override
+    public boolean saveToXML(Node node)
+    {
+        if (!super.saveToXML(node)) return false;
+        
+        XMLUtil.setAttributeDoubleValue((Element) node, "Resolution", sampling.getValue());
+        
+        try
+        {
+            StringWriter vtkString = new StringWriter();
+            BufferedWriter writer = new BufferedWriter(vtkString);
+            saveToVTK(writer);
+            writer.close();
+            XMLUtil.setAttributeValue((Element) node, "VTK", vtkString.toString());
+        }
+        catch (IOException e)
+        {
+            e.printStackTrace();
+            return false;
+        }
+        
+        return true;
+    }
+    
+    void saveToVTK(BufferedWriter buffer) throws IOException
+    {
+        PrintWriter writer = new PrintWriter(buffer);
+        
+        // re-order points and faces to remove blank spaces
+        
+        ArrayList<Point3d> pts = new ArrayList<Point3d>();
+        ArrayList<Face> newFaces = new ArrayList<Face>(faces.size());
+        
+        for (Face f : faces)
+            newFaces.add(new Face(f.v1.intValue(), f.v2.intValue(), f.v3.intValue()));
+        
+        int lastNonNullIndex = 0;
+        int nullCount = 0;
+        
+        reordering:
+        for (int i = 0; i < vertices.size(); i++)
+        {
+            nullCount = 0;
+            
+            while (vertices.get(i) == null)
+            {
+                nullCount++;
+                i++;
+                if (i == vertices.size()) break reordering;
+            }
+            
+            pts.add(vertices.get(i).position);
+            lastNonNullIndex++;
+            
+            if (nullCount != 0)
+            {
+                // some null vertices were found starting at index (i-nullCount)
+                // subtract their number from all faces pointing to an index greater than the
+                // previous known valid vertex
+                for (Face f : newFaces)
+                {
+                    if (f.v1 >= lastNonNullIndex) f.v1 -= nullCount;
+                    if (f.v2 >= lastNonNullIndex) f.v2 -= nullCount;
+                    if (f.v3 >= lastNonNullIndex) f.v3 -= nullCount;
+                }
+            }
+            // lastNonNullIndex = i;
+        }
+        
+        // VTK File format is written as follows:
+        
+        // line 1: "# vtk DataFile Version x.x"
+        writer.println("# vtk DataFile Version 3.0");
+        
+        // line 2: header information (256 chars max)
+        writer.println("A great-looking cell");
+        
+        // line 3: data format (one of ASCII or BINARY)
+        writer.println("ASCII");
+        
+        // line 4: dataset structure "DATASET [OPTIONS]"
+        writer.println("DATASET POLYDATA");
+        
+        // line 5: dataset type "POINTS number type"
+        writer.println("POINTS " + pts.size() + " double");
+        
+        // one line per vertex "x y z"
+        for (Point3d v : pts)
+            writer.println(v.x + " " + v.y + " " + v.z);
+        
+        // neighborhood information "POLYGONS faces nbItems"
+        writer.println("POLYGONS " + faces.size() + " " + 4 * faces.size());
+        
+        // one line per face "numVertices v1 v2 ... vn"
+        for (Face f : newFaces)
+            writer.println("3 " + f.v1 + " " + f.v2 + " " + f.v3);
+        
+        writer.flush();
+    }
+    
+    @Override
+    public boolean loadFromXML(Node node)
+    {
+        if (!super.loadFromXML(node)) return false;
+        
+        sampling.setValue(XMLUtil.getAttributeDoubleValue((Element) node, "Resolution", 1.0));
+        
+        try
+        {
+            String vtkString = XMLUtil.getAttributeValue((Element) node, "VTK", null);
+            if (vtkString == null) return false;
+            BufferedReader reader = new BufferedReader(new StringReader(vtkString));
+            loadFromVTK(reader);
+            
+            updateMetaData();
+        }
+        catch (IOException e)
+        {
+            e.printStackTrace();
+            return false;
+        }
+        
+        return true;
+    }
+    
+    void loadFromVTK(BufferedReader reader) throws IOException
+    {
+        // VTK File format is written as follows:
+        
+        // line 1: "# vtk DataFile Version x.x"
+        reader.readLine();
+        
+        // line 2: header information (256 chars max)
+        reader.readLine();
+        
+        // line 3: data format (one of ASCII or BINARY)
+        reader.readLine();
+        
+        // line 4: dataset structure "DATASET [OPTIONS]"
+        reader.readLine();
+        
+        // line 5: dataset type "POINTS number type"
+        String strPoints = reader.readLine();
+        int nbPoints = Integer.parseInt(strPoints.split(" ")[1]);
+        
+        // one line per vertex "x y z"
+        for (int i = 0; i < nbPoints; i++)
+        {
+            String[] v = reader.readLine().split(" ");
+            addPoint(new Point3d(Double.parseDouble(v[0]), Double.parseDouble(v[1]), Double.parseDouble(v[2])));
+        }
+        
+        // neighborhood information "POLYGONS faces nbItems"
+        String strFaces = reader.readLine();
+        int nbFaces = Integer.parseInt(strFaces.split(" ")[1]);
+        
+        // one line per face "numVertices v1 v2 ... vn"
+        for (int i = 0; i < nbFaces; i++)
+        {
+            String[] f = reader.readLine().split(" ");
+            try
+            {
+                addFace(Integer.parseInt(f[1]), Integer.parseInt(f[2]), Integer.parseInt(f[3]));
+            }
+            catch (TopologyException e)
+            {
+                e.printStackTrace();
+            }
         }
     }
 }

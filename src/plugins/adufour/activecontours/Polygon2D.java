@@ -33,8 +33,8 @@ import javax.vecmath.Point3d;
 import javax.vecmath.Vector3d;
 
 import plugins.adufour.activecontours.ActiveContours.ROIType;
-import plugins.adufour.ezplug.EzVarDouble;
 import plugins.adufour.morphology.FillHolesInROI;
+import plugins.adufour.vars.lang.Var;
 import plugins.kernel.roi.roi2d.ROI2DArea;
 import plugins.kernel.roi.roi2d.ROI2DEllipse;
 import plugins.kernel.roi.roi2d.ROI2DPolygon;
@@ -102,9 +102,9 @@ public class Polygon2D extends ActiveContour
     
     private boolean              counterClockWise;
     
-    protected Polygon2D(EzVarDouble contour_resolution, SlidingWindow convergenceWindow)
+    protected Polygon2D(Var<Double> sampling, SlidingWindow convergenceWindow)
     {
-        super(contour_resolution, convergenceWindow);
+        super(sampling, convergenceWindow);
         
         setColor(Color.getHSBColor((float) Math.random(), 0.8f, 0.9f));
     }
@@ -116,7 +116,7 @@ public class Polygon2D extends ActiveContour
      */
     public Polygon2D(Polygon2D contour)
     {
-        this(contour.resolution, new SlidingWindow(contour.convergence.getSize()));
+        this(contour.sampling, new SlidingWindow(contour.convergence.getSize()));
         
         setColor(contour.getColor());
         int n = contour.points.size();
@@ -143,9 +143,9 @@ public class Polygon2D extends ActiveContour
         counterClockWise = contour.counterClockWise;
     }
     
-    public Polygon2D(EzVarDouble contour_resolution, SlidingWindow convergenceWindow, ROI2D roi)
+    public Polygon2D(Var<Double> sampling, SlidingWindow convergenceWindow, ROI2D roi)
     {
-        this(contour_resolution, convergenceWindow);
+        this(sampling, convergenceWindow);
         
         if (!(roi instanceof ROI2DEllipse) && !(roi instanceof ROI2DRectangle) && !(roi instanceof ROI2DPolygon) && !(roi instanceof ROI2DArea))
         {
@@ -163,7 +163,7 @@ public class Polygon2D extends ActiveContour
             
             try
             {
-                triangulate((ROI2DArea) roi, contour_resolution.getValue());
+                triangulate((ROI2DArea) roi, sampling.getValue());
             }
             catch (TopologyException e)
             {
@@ -357,7 +357,7 @@ public class Polygon2D extends ActiveContour
         Point3d center = new Point3d();
         
         int nPoints = j - i;
-        Polygon2D child1 = new Polygon2D(resolution, new SlidingWindow(this.convergence.getSize()));
+        Polygon2D child1 = new Polygon2D(sampling, new SlidingWindow(this.convergence.getSize()));
         for (int p = 0; p < nPoints; p++)
         {
             Point3d pp = points.get(p + i);
@@ -373,7 +373,7 @@ public class Polygon2D extends ActiveContour
         center.set(0, 0, 0);
         
         nPoints = i + n - j;
-        Polygon2D child2 = new Polygon2D(resolution, new SlidingWindow(this.convergence.getSize()));
+        Polygon2D child2 = new Polygon2D(sampling, new SlidingWindow(this.convergence.getSize()));
         for (int p = 0, pj = p + j; p < nPoints; p++, pj++)
         {
             Point3d pp = points.get(pj % n);
@@ -711,7 +711,7 @@ public class Polygon2D extends ActiveContour
             outDiff = val - cout;
             outDiff *= outDiff;
             
-            sum = weight * resolution.getValue() * (sensitivity * outDiff) - (inDiff / sensitivity);
+            sum = weight * sampling.getValue() * (sensitivity * outDiff) - (inDiff / sensitivity);
             
             cvms.scale(counterClockWise ? -sum : sum, norm);
             
@@ -734,7 +734,7 @@ public class Polygon2D extends ActiveContour
         Vector3d f;
         Point3d prev, curr, next;
         
-        weight /= resolution.getValue();
+        weight /= sampling.getValue();
         
         // first point
         prev = points.get(n - 1);
@@ -1039,21 +1039,6 @@ public class Polygon2D extends ActiveContour
         }
     }
     
-    @Override
-    protected void initFrom(ActiveContour contour)
-    {
-        int n = 0;
-        for (Point3d p : contour)
-        {
-            addPoint(p);
-            x += p.x;
-            y += p.y;
-            n++;
-        }
-        x /= n;
-        y /= n;
-    }
-    
     /**
      * Tests whether the given point is inside the contour, and if so returns the penetration depth
      * of this point. <br>
@@ -1124,7 +1109,7 @@ public class Polygon2D extends ActiveContour
     void move(ROI field, double timeStep)
     {
         Vector3d force = new Vector3d();
-        double maxDisp = resolution.getValue() * timeStep;
+        double maxDisp = sampling.getValue() * timeStep;
         
         int n = points.size();
         
@@ -1229,8 +1214,8 @@ public class Polygon2D extends ActiveContour
     {
         if (getDimension(0) < 15) throw new TopologyException(this, new Polygon2D[] {});
         
-        double minLength = resolution.getValue() * minFactor;
-        double maxLength = resolution.getValue() * maxFactor;
+        double minLength = sampling.getValue() * minFactor;
+        double maxLength = sampling.getValue() * maxFactor;
         
         // optimization to avoid multiple points.size() calls (WARNING: n must
         // be updated manually whenever points is changed)
@@ -1246,7 +1231,7 @@ public class Polygon2D extends ActiveContour
             updateNormals();
         }
         
-        Polygon2D[] children = cpt % 2 == 0 ? null : checkSelfIntersection(resolution.getValue());
+        Polygon2D[] children = cpt % 2 == 0 ? null : checkSelfIntersection(sampling.getValue());
         cpt++;
         
         if (children != null) throw new TopologyException(this, children);

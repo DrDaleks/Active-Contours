@@ -12,7 +12,8 @@ import javax.media.j3d.BoundingSphere;
 import javax.vecmath.Point3d;
 
 import plugins.adufour.activecontours.ActiveContours.ROIType;
-import plugins.adufour.ezplug.EzVarDouble;
+import plugins.adufour.vars.lang.Var;
+import plugins.adufour.vars.lang.VarDouble;
 import plugins.nchenouard.spot.Detection;
 
 /**
@@ -24,42 +25,35 @@ public abstract class ActiveContour extends Detection implements Iterable<Point3
 {
     protected final Processor      processor      = new Processor(SystemUtil.getAvailableProcessors() * 2);
     
-    protected final SlidingWindow  convergence;
+    protected SlidingWindow        convergence;
     
-    protected final EzVarDouble    resolution;
+    protected VarDouble            sampling     = new VarDouble("sampling", 1.0);
     
     protected final BoundingSphere boundingSphere = new BoundingSphere();
     
     protected final BoundingBox    boundingBox    = new BoundingBox();
     
-    protected ActiveContour(EzVarDouble contour_resolution, SlidingWindow convergenceWindow)
+    /**
+     * Constructor for XML loading purposes only
+     */
+    protected ActiveContour()
+    {
+        super(0, 0, 0, 0);
+    }
+    
+    @SuppressWarnings("unchecked")
+    protected ActiveContour(Var<Double> sampling, SlidingWindow convergenceWindow)
     {
         super(0, 0, 0, 0);
         
-        this.resolution = contour_resolution;
+        // follow and shortcut references to avoid memory leaks
+        while (sampling.getReference() != null) sampling = (Var<Double>) sampling.getReference();
+        this.sampling.setReference(sampling);
+        
         this.convergence = convergenceWindow;
         
         setColor(Color.getHSBColor((float) Math.random(), 0.8f, 0.9f));
-        
         processor.setDefaultThreadName(getClass().getSimpleName());
-    }
-    
-    /**
-     * Creates a clone of the specified contour
-     * 
-     * @param contour
-     */
-    protected ActiveContour(ActiveContour contour)
-    {
-        this(contour.resolution, new SlidingWindow(contour.convergence.getSize()));
-        
-        setX(contour.x);
-        setY(contour.y);
-        setZ(contour.z);
-        
-        setColor(contour.getColor());
-        
-        initFrom(contour);
     }
     
     @Override
@@ -86,8 +80,6 @@ public abstract class ActiveContour extends Detection implements Iterable<Point3
      *         elements if both contours are viable
      */
     protected abstract ActiveContour[] checkSelfIntersection(double minDistance);
-    
-    protected abstract void initFrom(ActiveContour contour);
     
     /**
      * Update the axis constraint force, which adjusts the takes the final forces and normalize them
@@ -171,33 +163,7 @@ public abstract class ActiveContour extends Detection implements Iterable<Point3
      *         </ul>
      */
     public abstract double contains(Point3d p);
-    
-    public BoundingBox getBoundingBox()
-    {
-        BoundingBox bbox = new BoundingBox();
-        double minX = Double.MAX_VALUE;
-        double minY = Double.MAX_VALUE;
-        double minZ = Double.MAX_VALUE;
-        double maxX = 0.0;
-        double maxY = 0.0;
-        double maxZ = 0.0;
         
-        for (Point3d p : this)
-        {
-            if (p.x < minX) minX = p.x;
-            if (p.y < minY) minY = p.y;
-            if (p.z < minZ) minZ = p.z;
-            if (p.x > maxX) maxX = p.x;
-            if (p.y > maxY) maxY = p.y;
-            if (p.z > maxZ) maxZ = p.z;
-        }
-        
-        bbox.setLower(minX, minY, minZ);
-        bbox.setUpper(maxX, maxY, maxZ);
-        
-        return bbox;
-    }
-    
     /**
      * @param order
      *            the dimension (a.k.a. norm) to compute:<br/>
