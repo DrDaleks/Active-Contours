@@ -215,7 +215,7 @@ public class Mesh3D extends ActiveContour
         
         public final Vector3d           normal;
         
-//        public double                   distanceToCenter = 0;
+        // public double distanceToCenter = 0;
         
         public Vertex(Vertex v)
         {
@@ -278,7 +278,6 @@ public class Mesh3D extends ActiveContour
      */
     public Mesh3D()
     {
-        
     }
     
     /**
@@ -2391,6 +2390,8 @@ public class Mesh3D extends ActiveContour
         if (!super.saveToXML(node)) return false;
         
         XMLUtil.setAttributeDoubleValue((Element) node, "Resolution", sampling.getValue());
+        XMLUtil.setAttributeDoubleValue((Element) node, "PixelSizeXY", pixelSizeXY);
+        XMLUtil.setAttributeDoubleValue((Element) node, "PixelSizeZ", pixelSizeZ);
         
         try
         {
@@ -2491,6 +2492,12 @@ public class Mesh3D extends ActiveContour
         if (!super.loadFromXML(node)) return false;
         
         sampling.setValue(XMLUtil.getAttributeDoubleValue((Element) node, "Resolution", 1.0));
+        
+        // => Legacy issue: old versions may not indicate pixel size. In this case, set the default
+        // pixel size to -1 => getX(), getY() and getZ() will return (negative) real values, instead
+        // of (positive) pixel values, so as to know which is which
+        pixelSizeXY = XMLUtil.getAttributeDoubleValue((Element) node, "PixelSizeXY", -1.0);
+        pixelSizeZ = XMLUtil.getAttributeDoubleValue((Element) node, "PixelSizeZ", -1.0);
         
         try
         {
