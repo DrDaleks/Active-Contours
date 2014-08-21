@@ -462,6 +462,9 @@ public class Polygon2D extends ActiveContour
         // if (!imageData_float.getBounds2D().contains(path.getBounds())) return 0.0;
         
         int myZ = (int) Math.round(getZ());
+        
+        if (myZ == -1 && imageData_float.getSizeZ() == 1) myZ = 0;
+
         float[] _data = imageData_float.getDataXYAsFloat(0, myZ, channel);
         if (_data == null) throw new IllegalArgumentException("Contour.getZ() = " + getZ() + "; Stack size = " + imageData_float.getSizeZ());
         
