@@ -53,7 +53,7 @@ public abstract class ActiveContour extends Detection implements Iterable<Point3
         this.convergence = convergenceWindow;
         
         setColor(Color.getHSBColor((float) Math.random(), 0.8f, 0.9f));
-        processor.setDefaultThreadName(getClass().getSimpleName());
+        processor.setThreadName(getClass().getSimpleName());
     }
     
     @Override
