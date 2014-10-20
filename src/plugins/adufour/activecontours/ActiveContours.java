@@ -167,7 +167,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     
     public ActiveContours()
     {
-        multiThreadService.setDefaultThreadName("Active Contours");
+        multiThreadService.setThreadName("Active Contours");
     }
     
     public TrackGroup getTrackGroup()
