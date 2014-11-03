@@ -1,5 +1,6 @@
 package plugins.adufour.activecontours;
 
+import icy.roi.BooleanMask3D;
 import icy.roi.ROI;
 import icy.sequence.Sequence;
 import icy.system.SystemUtil;
@@ -27,7 +28,7 @@ public abstract class ActiveContour extends Detection implements Iterable<Point3
     
     protected SlidingWindow        convergence;
     
-    protected VarDouble            sampling     = new VarDouble("sampling", 1.0);
+    protected VarDouble            sampling       = new VarDouble("sampling", 1.0);
     
     protected final BoundingSphere boundingSphere = new BoundingSphere();
     
@@ -47,13 +48,15 @@ public abstract class ActiveContour extends Detection implements Iterable<Point3
         super(0, 0, 0, 0);
         
         // follow and shortcut references to avoid memory leaks
-        while (sampling.getReference() != null) sampling = (Var<Double>) sampling.getReference();
+        while (sampling.getReference() != null)
+            sampling = (Var<Double>) sampling.getReference();
         this.sampling.setReference(sampling);
         
         this.convergence = convergenceWindow;
-        
-        setColor(Color.getHSBColor((float) Math.random(), 0.8f, 0.9f));
         processor.setThreadName(getClass().getSimpleName());
+        
+        // give a random color
+        setColor(Color.getHSBColor((float) Math.random(), 0.8f, 0.9f));
     }
     
     @Override
@@ -61,13 +64,13 @@ public abstract class ActiveContour extends Detection implements Iterable<Point3
     
     /**
      * Adds the specified point to the contour. It is up to the implementing classes to determine
-     * whether the points should be added in a specific order or based on gemoetrical rules
+     * whether the points should be added in a specific order or based on geometric rules
      * 
      * @param p
      *            the point to add
      * @return the index indicating where the point has been inserted in the internal list
      */
-    protected abstract int addPoint(Point3d p);
+    protected abstract void addPoint(Point3d p);
     
     /**
      * Checks whether the contour is self-intersecting. Depending on the given parameters, a
@@ -141,14 +144,14 @@ public abstract class ActiveContour extends Detection implements Iterable<Point3
      *            the data on which the average intensity should be computed
      * @param channel
      *            the channel on which the average intensity should be computed
-     * @param buffer
-     *            the binary mask buffer where this contour should be rasterised
+     * @param mask
+     *            the boolean mask where this contour should be rasterised
      * @return the average intensity inside the contour
      * @throws TopologyException
      *             if the contour becomes extremely thin to the point where it contains no pixel to
      *             measure intensity
      */
-    public abstract double computeAverageIntensity(Sequence imageData, int channel, Sequence buffer) throws TopologyException;
+    public abstract double computeAverageIntensity(Sequence imageData, int channel, BooleanMask3D mask) throws TopologyException;
     
     /**
      * Tests whether the given point is inside the contour, and if so returns the penetration depth
@@ -162,8 +165,8 @@ public abstract class ActiveContour extends Detection implements Iterable<Point3
      *         edge
      *         </ul>
      */
-    public abstract double contains(Point3d p);
-        
+    public abstract double getDistanceToEdge(Point3d p);
+    
     /**
      * @param order
      *            the dimension (a.k.a. norm) to compute:<br/>

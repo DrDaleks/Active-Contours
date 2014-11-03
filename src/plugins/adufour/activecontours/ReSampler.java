@@ -53,7 +53,7 @@ public class ReSampler implements Callable<Boolean>
             for (TrackSegment segment : new ArrayList<TrackSegment>(trackGroup.getTrackSegmentList()))
             {
                 if (segment == null) continue; // FIXME Fabrice: how could this happen?
-                
+                    
                 if (segment.containsDetection(contour))
                 {
                     currentSegment = segment;
@@ -74,7 +74,11 @@ public class ReSampler implements Callable<Boolean>
                 }
             }
             
-            if (! (e instanceof TopologyException)) return change;
+            if (!(e instanceof TopologyException))
+            {
+                e.printStackTrace();
+                return change;
+            }
             
             // 3) Deal with the children
             

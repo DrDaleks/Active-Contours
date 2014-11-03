@@ -5,6 +5,7 @@ import icy.canvas.IcyCanvas2D;
 import icy.gui.frame.progress.AnnounceFrame;
 import icy.main.Icy;
 import icy.roi.BooleanMask2D;
+import icy.roi.BooleanMask3D;
 import icy.roi.ROI;
 import icy.roi.ROI2D;
 import icy.sequence.Sequence;
@@ -35,6 +36,7 @@ import javax.vecmath.Vector3d;
 import plugins.adufour.activecontours.ActiveContours.ROIType;
 import plugins.adufour.morphology.FillHolesInROI;
 import plugins.adufour.vars.lang.Var;
+import plugins.adufour.vars.lang.VarDouble;
 import plugins.kernel.roi.roi2d.ROI2DArea;
 import plugins.kernel.roi.roi2d.ROI2DEllipse;
 import plugins.kernel.roi.roi2d.ROI2DPolygon;
@@ -169,11 +171,9 @@ public class Polygon2D extends ActiveContour
             {
                 int z = roi.getZ();
                 int t = roi.getT();
-                int c = roi.getC();
                 roi = new ROI2DEllipse(roi.getBounds2D());
                 roi.setZ(z);
                 roi.setT(t);
-                roi.setC(c);
             }
             
         }
@@ -183,11 +183,9 @@ public class Polygon2D extends ActiveContour
             // replace by ellipse
             int z = roi.getZ();
             int t = roi.getT();
-            int c = roi.getC();
             roi = new ROI2DEllipse(roi.getBounds2D());
             roi.setZ(z);
             roi.setT(t);
-            roi.setC(c);
             
             points.clear();
             
@@ -234,10 +232,9 @@ public class Polygon2D extends ActiveContour
         updateMetaData();
     }
     
-    protected int addPoint(Point3d p)
+    protected void addPoint(Point3d p)
     {
         points.add(p);
-        return points.size();
     }
     
     /**
@@ -246,9 +243,9 @@ public class Polygon2D extends ActiveContour
      * 
      * @param minDistance
      *            the distance threshold between non-neighboring points to detect self-intersection
-     * @return null if either no self-intersection is detected or if one of the new contours is too
-     *         small, or an array of contours with 0 elements if both contours are too small, and 2
-     *         elements if both contours are viable
+     * @return <code>null</code> if either no self-intersection is detected or if one of the new
+     *         contours is too small, or an array of contours with 0 elements if both contours are
+     *         too small, and 2 elements if both contours are viable
      */
     protected Polygon2D[] checkSelfIntersection(double minDistance)
     {
@@ -454,112 +451,6 @@ public class Polygon2D extends ActiveContour
     public Polygon2D clone()
     {
         return new Polygon2D(this);
-    }
-    
-    @Override
-    public double computeAverageIntensity(Sequence imageData_float, int channel, Sequence buffer_data)
-    {
-        // if (!imageData_float.getBounds2D().contains(path.getBounds())) return 0.0;
-        
-        int myZ = (int) Math.round(getZ());
-        
-        if (myZ == -1 && imageData_float.getSizeZ() == 1) myZ = 0;
-
-        float[] _data = imageData_float.getDataXYAsFloat(0, myZ, channel);
-        if (_data == null) throw new IllegalArgumentException("Contour.getZ() = " + getZ() + "; Stack size = " + imageData_float.getSizeZ());
-        
-        short[] _mask = buffer_data == null ? null : buffer_data.getDataXYAsShort(0, myZ, 0);
-        
-        int sizeX = imageData_float.getWidth();
-        int sizeY = imageData_float.getHeight();
-        
-        // compute the interior mean intensity
-        double inSum = 0, inCpt = 0;
-        // double outSum = 0, outCpt = 0;
-        Point3d minBounds = new Point3d();
-        Point3d maxBounds = new Point3d();
-        boundingBox.getLower(minBounds);
-        boundingBox.getUpper(maxBounds);
-        
-        int minX = Math.max((int) minBounds.x - 10, -1);
-        int maxX = Math.min((int) maxBounds.x + 10, sizeX);
-        int minY = Math.max((int) minBounds.y - 10, 0);
-        int maxY = Math.min((int) maxBounds.y + 10, sizeY);
-        
-        int n = points.size();
-        Point3d p1 = null, p2 = null;
-        TreeSet<Integer> crosses = new TreeSet<Integer>();
-        
-        for (int j = minY; j < maxY; j++)
-        {
-            int offset = j * sizeX + minX;
-            
-            crosses.clear();
-            crosses.add(minX);
-            
-            for (int p = 0; p < n - 1; p++)
-            {
-                p1 = points.get(p);
-                p2 = points.get(p + 1);
-                
-                if (j > Math.min(p1.y, p2.y) && j < Math.max(p1.y, p2.y)) crosses.add((int) Math.round((p1.x + p2.x) * 0.5));
-            }
-            p1 = points.get(0);
-            
-            if (j > Math.min(p1.y, p2.y) && j < Math.max(p1.y, p2.y)) crosses.add((int) Math.round((p1.x + p2.x) * 0.5));
-            
-            crosses.add(maxX);
-            
-            int nC = crosses.size();
-            
-            if (nC == 2)
-            {
-                // for (int i = minX + 1; i < maxX - 1; i++, offset++)
-                // {
-                // outSum += _data[offset];
-                // outCpt++;
-                // }
-            }
-            else
-            {
-                boolean in = false;
-                
-                Iterator<Integer> it = crosses.iterator();
-                int start = it.next();
-                if (start < 0) start = 0;
-                
-                while (it.hasNext())
-                {
-                    int end = it.next();
-                    if (end > sizeX) end = sizeX;
-                    
-                    if (in)
-                    {
-                        for (int i = start; i < end; i++, offset++)
-                        {
-                            if (offset < 0 || offset >= _data.length) continue;
-                            _mask[offset] = 1;
-                            inSum += _data[offset];
-                            inCpt++;
-                        }
-                    }
-                    else
-                    {
-                        // for (int i = start; i < end; i++, offset++)
-                        // {
-                        // outSum += _data[offset];
-                        // outCpt++;
-                        // }
-                        offset += end - start + 1;
-                    }
-                    
-                    start = end;
-                    in = !in;
-                }
-            }
-        }
-        // cout = outSum / outCpt;
-        return inSum / inCpt;
     }
     
     /**
@@ -831,7 +722,7 @@ public class Polygon2D extends ActiveContour
             {
                 tests++;
                 
-                if ((penetration = target.contains(p)) > 0)
+                if ((penetration = target.getDistanceToEdge(p)) > 0)
                 {
                     Vector3d feedbackForce = feedbackForces[index];
                     
@@ -864,8 +755,7 @@ public class Polygon2D extends ActiveContour
         
         for (int i = 0; i < segments.size(); i++)
         {
-            if (tail.distance(segments.get(i).getHead()) <= EPSILON)
-                insertAtHeadOf = i;
+            if (tail.distance(segments.get(i).getHead()) <= EPSILON) insertAtHeadOf = i;
             else if (head.distance(segments.get(i).getTail()) <= EPSILON) insertAtTailOf = i;
         }
         
@@ -1066,7 +956,7 @@ public class Polygon2D extends ActiveContour
      *            a point to test
      * @return true if the point is inside the contour
      */
-    public double contains(Point3d p)
+    public double getDistanceToEdge(Point3d p)
     {
         Point3d q = new Point3d(p.x + 10000 * (p.x - x), p.y + 10000 * (p.y - y), 0);
         
@@ -1573,6 +1463,110 @@ public class Polygon2D extends ActiveContour
     }
     
     @Override
+    public double computeAverageIntensity(Sequence imageData_float, int channel, BooleanMask3D mask)
+    {
+        int myZ = (int) Math.round(getZ());
+        
+        if (myZ == -1 && imageData_float.getSizeZ() == 1) myZ = 0;
+        
+        float[] _data = imageData_float.getDataXYAsFloat(0, myZ, channel);
+        if (_data == null) throw new IllegalArgumentException("Contour.getZ() = " + getZ() + "; Stack size = " + imageData_float.getSizeZ());
+        
+        boolean[] _mask = (mask == null ? null : mask.mask.get(myZ).mask);
+        
+        int sizeX = imageData_float.getWidth();
+        int sizeY = imageData_float.getHeight();
+        
+        // compute the interior mean intensity
+        double inSum = 0, inCpt = 0;
+        // double outSum = 0, outCpt = 0;
+        Point3d minBounds = new Point3d();
+        Point3d maxBounds = new Point3d();
+        boundingBox.getLower(minBounds);
+        boundingBox.getUpper(maxBounds);
+        
+        int minX = Math.max((int) minBounds.x - 10, -1);
+        int maxX = Math.min((int) maxBounds.x + 10, sizeX);
+        int minY = Math.max((int) minBounds.y - 10, 0);
+        int maxY = Math.min((int) maxBounds.y + 10, sizeY);
+        
+        int n = points.size();
+        Point3d p1 = null, p2 = null;
+        TreeSet<Integer> crosses = new TreeSet<Integer>();
+        
+        for (int j = minY; j < maxY; j++)
+        {
+            int offset = j * sizeX + minX;
+            
+            crosses.clear();
+            crosses.add(minX);
+            
+            for (int p = 0; p < n - 1; p++)
+            {
+                p1 = points.get(p);
+                p2 = points.get(p + 1);
+                
+                if (j > Math.min(p1.y, p2.y) && j < Math.max(p1.y, p2.y)) crosses.add((int) Math.round((p1.x + p2.x) * 0.5));
+            }
+            p1 = points.get(0);
+            
+            if (j > Math.min(p1.y, p2.y) && j < Math.max(p1.y, p2.y)) crosses.add((int) Math.round((p1.x + p2.x) * 0.5));
+            
+            crosses.add(maxX);
+            
+            int nC = crosses.size();
+            
+            if (nC == 2)
+            {
+                // for (int i = minX + 1; i < maxX - 1; i++, offset++)
+                // {
+                // outSum += _data[offset];
+                // outCpt++;
+                // }
+            }
+            else
+            {
+                boolean in = false;
+                
+                Iterator<Integer> it = crosses.iterator();
+                int start = it.next();
+                if (start < 0) start = 0;
+                
+                while (it.hasNext())
+                {
+                    int end = it.next();
+                    if (end > sizeX) end = sizeX;
+                    
+                    if (in)
+                    {
+                        for (int i = start; i < end; i++, offset++)
+                        {
+                            if (offset < 0 || offset >= _data.length) continue;
+                            _mask[offset] = true;
+                            inSum += _data[offset];
+                            inCpt++;
+                        }
+                    }
+                    else
+                    {
+                        // for (int i = start; i < end; i++, offset++)
+                        // {
+                        // outSum += _data[offset];
+                        // outCpt++;
+                        // }
+                        offset += end - start + 1;
+                    }
+                    
+                    start = end;
+                    in = !in;
+                }
+            }
+        }
+        // cout = outSum / outCpt;
+        return inSum / inCpt;
+    }
+    
+    @Override
     public void toSequence(Sequence output, double value)
     {
         int myZ = (int) Math.round(getZ());
@@ -1675,5 +1669,31 @@ public class Polygon2D extends ActiveContour
                 }
             }
         }
+    }
+    
+    /**
+     * Perform a raster scan on the contour, and calculate various information based on the
+     * specified parameters. The raster scan algorithm is a 2D version of the line-scan algorithm
+     * developed in: <i>Dufour et al., 3D active meshes: fast discrete deformable models for cell
+     * tracking in 3D time-lapse microscopy. IEEE Transactions on Image Processing 20, 2011</i>
+     * 
+     * @param updateLocalMask
+     *            indicates whether the local boolean mask should be updated (this is used to get a
+     *            {@link BooleanMask3D} version of this mesh)
+     * @param imageData
+     *            (set to <code>null</code> if not needed) a sequence that will be used to compute
+     *            the average intensity inside the mesh (note that the T and C have to be different
+     *            than <code>-1</code> if the sequence has more than 1 time point and 1 channel)
+     * @param averageIntensity
+     *            (only used if <code>imageData</code> is provided) a variable that will be hold the
+     *            average image intensity inside the contour after the scan is complete
+     * @param bufferData
+     *            (set to <code>null</code> if not needed) a byte buffer data in the form [z][xy] of
+     *            same dimensions as the image data that will be filled with value <code>1</code>
+     *            inside the contour
+     */
+    public void rasterScan(final boolean updateLocalMask, final Sequence imageData, VarDouble averageIntensity, final BooleanMask3D imageMask)
+    {
+        
     }
 }

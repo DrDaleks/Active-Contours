@@ -3,6 +3,7 @@ package plugins.adufour.activecontours;
 import icy.gui.util.GuiUtil;
 import icy.math.ArrayMath;
 import icy.plugin.interface_.PluginBundled;
+import icy.preferences.XMLPreferences;
 import icy.util.XLSUtil;
 
 import java.awt.event.ActionEvent;
@@ -42,8 +43,9 @@ import org.jfree.chart.renderer.xy.XYItemRenderer;
 import org.jfree.data.xy.XYSeries;
 import org.jfree.data.xy.XYSeriesCollection;
 
-import plugins.adufour.activecontours.Mesh3D.Vertex;
 import plugins.adufour.quickhull.QuickHull3D;
+import plugins.adufour.roi3d.mesh.surface.ROI3DTriangularMesh;
+import plugins.adufour.roi3d.mesh.surface.Vertex;
 import plugins.fab.trackmanager.PluginTrackManagerProcessor;
 import plugins.fab.trackmanager.TrackSegment;
 import plugins.nchenouard.spot.Detection;
@@ -57,6 +59,8 @@ import Jama.Matrix;
  */
 public class DeformationProfiler extends PluginTrackManagerProcessor implements PluginBundled
 {
+    private static XMLPreferences preferences = null;
+    
     private enum Descriptors
     {
         None("None"),
@@ -95,6 +99,8 @@ public class DeformationProfiler extends PluginTrackManagerProcessor implements 
     
     public DeformationProfiler()
     {
+        if (preferences == null) preferences = getPreferencesRoot(); 
+                
         super.getDescriptor().setDescription("Monitor the 3D deformation over time");
         super.setName("3D Deformation Profiler");
         
@@ -272,11 +278,17 @@ public class DeformationProfiler extends PluginTrackManagerProcessor implements 
     
     private void exportMeshToVTK()
     {
-        JFileChooser jfc = new JFileChooser();
+        // Restore last used folder
+        String vtkFolder = preferences.get("vtkFolder", null);
+        
+        JFileChooser jfc = new JFileChooser(vtkFolder);
         
         if (jfc.showSaveDialog(null) != JFileChooser.APPROVE_OPTION) return;
         
         File f = jfc.getSelectedFile();
+        
+        // store the folder in the preferences
+        preferences.put("vtkFolder", f.getParent());
         
         int cpt = 0;
         for (TrackSegment ts : trackPool.getTrackSegmentList())
@@ -296,7 +308,7 @@ public class DeformationProfiler extends PluginTrackManagerProcessor implements 
                     if (det.getDetectionType() != Detection.DETECTIONTYPE_VIRTUAL_DETECTION)
                     {
                         BufferedWriter writer = new BufferedWriter(new FileWriter(f.getAbsolutePath() + fileName));
-                        ((Mesh3D) det).saveToVTK(writer);
+                        ((Mesh3D) det).mesh.saveToVTK(writer);
                     }
                 }
                 catch (FileNotFoundException e)
@@ -523,7 +535,7 @@ public class DeformationProfiler extends PluginTrackManagerProcessor implements 
             {
                 if (!(det instanceof Mesh3D)) continue;
                 
-                final Mesh3D contour = (Mesh3D) det;
+                final ROI3DTriangularMesh mesh = ((Mesh3D) det).mesh;
                 // final double samplingDistance = contour.sampling.getValue() * 3;
                 
                 results.add(service.submit(new Runnable()
@@ -533,12 +545,12 @@ public class DeformationProfiler extends PluginTrackManagerProcessor implements 
                     {
                         // Point3d center = contour.getMassCenter();
                         
-                        double[] localRoughness = new double[(int) contour.getDimension(0)];
+                        double[] localRoughness = new double[(int) mesh.getNorm(0)];
                         
                         int n = 0;
                         
                         // compute local roughness for each mesh point
-                        for (Vertex v1 : contour.vertices)
+                        for (Vertex v1 : mesh.vertices)
                         {
                             if (v1 == null) continue;
                             
@@ -549,7 +561,7 @@ public class DeformationProfiler extends PluginTrackManagerProcessor implements 
                             // add the first ring of neighbors
                             for (Integer n1 : v1.neighbors)
                             {
-                                Vertex vn1 = contour.vertices.get(n1);
+                                Vertex vn1 = mesh.vertices.get(n1);
                                 if (vn1 == null || vn1 == v1 || neighborhood.contains(vn1)) continue;
                                 
                                 neighborhood.add(vn1);
@@ -557,7 +569,7 @@ public class DeformationProfiler extends PluginTrackManagerProcessor implements 
                                 // add the second ring of neighbors
                                 for (Integer n2 : vn1.neighbors)
                                 {
-                                    Vertex vn2 = contour.vertices.get(n2);
+                                    Vertex vn2 = mesh.vertices.get(n2);
                                     if (vn2 == null || vn2 == v1 || vn2 == vn1 || neighborhood.contains(vn2)) continue;
                                     
                                     neighborhood.add(vn2);
@@ -575,7 +587,7 @@ public class DeformationProfiler extends PluginTrackManagerProcessor implements 
                             localRoughness[n++] = ArrayMath.std(distances, false) / ArrayMath.mean(distances);
                         }
                         
-                        result[trackIndex][contour.getT()] = 100 / (1 + ArrayMath.mean(localRoughness));
+                        result[trackIndex][mesh.getT()] = 100 / (1 + ArrayMath.mean(localRoughness));
                     }
                 }));
             }
@@ -633,8 +645,8 @@ public class DeformationProfiler extends PluginTrackManagerProcessor implements 
                 if (!(det instanceof Mesh3D)) continue;
                 
                 Mesh3D contour = (Mesh3D) det;
-                Point3d center = contour.getMassCenter();
-                double minRadius = contour.getMinDistanceTo(center, null);
+                Point3d center = contour.getMassCenter(false);
+                double minRadius = contour.mesh.getMinDistanceTo(center, null);
                 double maxRadius = contour.boundingSphere.getRadius();
                 result[trackIndex][det.getT()] = 100.0 * minRadius / maxRadius;
             }
