@@ -421,7 +421,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             if (globalStop) break;
             
         }
-                
+        
         if (getUI() != null)
         {
             getUI().setProgressBarValue(0.0);
@@ -439,7 +439,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             }
         }
         
-        if (!globalStop)
+        // if (!globalStop)
         {
             // remove the painter after processing
             if (overlay != null) overlay.remove();
@@ -793,7 +793,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         else
         {
             ROI3DStack<ROI2DRectangle> field3D = new ROI3DStack<ROI2DRectangle>(ROI2DRectangle.class);
-            for (int z = 0; z < inputData.getSizeZ(); z++)
+            for (int z = 0; z < inputData.getSizeZ() - 1; z++)
                 field3D.setSlice(z, new ROI2DRectangle(0, 0, inputData.getWidth(), inputData.getHeight()));
             field = field3D;
         }
@@ -935,10 +935,10 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 contour.computeBalloonForces(balloon_weight.getValue());
             }
             
-            if (volume_constraint.getValue() && volumes.containsKey(segment))
-            {
-                contour.computeVolumeConstraint(volumes.get(segment));
-            }
+            // if (volume_constraint.getValue() && volumes.containsKey(segment))
+            // {
+            // contour.computeVolumeConstraint(volumes.get(segment));
+            // }
             
             contour.move(field, contour_timeStep.getValue());
         }
@@ -981,11 +981,6 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                             contour.computeBalloonForces(balloon_weight.getValue());
                         }
                         
-                        if (volume_constraint.getValue() && volumes.containsKey(segment))
-                        {
-                            contour.computeVolumeConstraint(volumes.get(segment));
-                        }
-                        
                         if (coupling_flag.getValue())
                         {
                             // Don't move the contours just now: coupling feedback must be computed
@@ -995,6 +990,11 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                                 if (otherContour == null || otherContour == contour) continue;
                                 
                                 contour.computeFeedbackForces(otherContour);
+                            }
+                            
+                            if (volume_constraint.getValue() && volumes.containsKey(segment))
+                            {
+                                contour.computeVolumeConstraint(volumes.get(segment));
                             }
                         }
                         else
@@ -1238,6 +1238,8 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     
     private void storeResult(int t)
     {
+        boolean noResultsOnCurrentFrame = true;
+        
         ArrayList<TrackSegment> segments = trackGroup.getValue().getTrackSegmentList();
         
         ArrayList<ROI> rois = null;
@@ -1253,10 +1255,16 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             ActiveContour contour = (ActiveContour) segment.getDetectionAtTime(t);
             if (contour == null) continue;
             
+            noResultsOnCurrentFrame = false;
+            
             // temporary fix: indicate correct surface area in the console
             if (contour instanceof Mesh3D) System.out.println("Mesh #" + i + ": surface area = " + contour.getDimension(1));
             
-            volumes.put(segment, contour.getDimension(2));
+            // Update volume information
+            if (!volumes.containsKey(segment))
+            {
+                volumes.put(segment, contour.getDimension(2));
+            }
             
             // output as ROIs
             try
@@ -1281,6 +1289,8 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         
         if (rois.size() > 0) roiOutput.setValue(rois.toArray(new ROI[0]));
         
+        // stop everything if there are no more contours to evolve
+        if (noResultsOnCurrentFrame && !tracking_newObjects.getValue()) globalStop = true;
     }
     
     @Override
