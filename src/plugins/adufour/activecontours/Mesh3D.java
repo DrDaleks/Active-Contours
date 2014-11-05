@@ -33,9 +33,13 @@ public class Mesh3D extends ActiveContour
      */
     private static class ActiveVertex extends Vertex
     {
-        public final Vector3d drivingForces  = new Vector3d();
+        public final Vector3d imageForces      = new Vector3d();
         
-        public final Vector3d feedbackForces = new Vector3d();
+        public final Vector3d internalForces   = new Vector3d();
+        
+        public final Vector3d feedbackForces   = new Vector3d();
+        
+        public final Vector3d volumeConstraint = new Vector3d();
         
         public ActiveVertex(ActiveVertex v)
         {
@@ -136,7 +140,7 @@ public class Mesh3D extends ActiveContour
             // goal: adjust the minimum using the weight, but keep max to 1
             double threshold = Math.max(colinearity, 1 - weight);
             
-            ((ActiveVertex) v).drivingForces.scale(threshold);
+            ((ActiveVertex) v).imageForces.scale(threshold);
         }
     }
     
@@ -147,7 +151,7 @@ public class Mesh3D extends ActiveContour
         {
             if (v == null) continue;
             
-            ((ActiveVertex) v).drivingForces.scaleAdd(weight, v.normal, ((ActiveVertex) v).drivingForces);
+            ((ActiveVertex) v).imageForces.scaleAdd(weight, v.normal, ((ActiveVertex) v).imageForces);
         }
     }
     
@@ -187,7 +191,7 @@ public class Mesh3D extends ActiveContour
             
             grad.sub(prev);
             grad.scale(weight);
-            ((ActiveVertex) v).drivingForces.add(grad);
+            ((ActiveVertex) v).imageForces.add(grad);
         }
     }
     
@@ -201,11 +205,13 @@ public class Mesh3D extends ActiveContour
         // sensitivity = sensitivity / (2 * Math.max(cout, cin));
         // sensitivity = sensitivity / (Math.log10(cin / cout));
         
+        Vector3d regionForce = new Vector3d();
+        
         double pixelSizeX = imageData.getPixelSizeX();
         double pixelSizeY = imageData.getPixelSizeY();
         double pixelSizeZ = imageData.getPixelSizeZ();
         
-        double val, inDiff, outDiff, sum;
+        double val, inDiff, outDiff;
         
         for (Vertex v : mesh.vertices)
         {
@@ -213,7 +219,7 @@ public class Mesh3D extends ActiveContour
             
             Point3d p = v.position;
             
-            // bounds check
+            regionForce.set(v.normal);
             
             val = getPixelValue(imageData, p.x / pixelSizeX, p.y / pixelSizeY, p.z / pixelSizeZ);
             
@@ -223,9 +229,9 @@ public class Mesh3D extends ActiveContour
             outDiff = val - cout;
             outDiff *= outDiff;
             
-            sum = weight * sampling.getValue() * (sensitivity * outDiff) - (inDiff / sensitivity);
+            regionForce.scale(weight * sampling.getValue() * (sensitivity * outDiff) - (inDiff / sensitivity));
             
-            ((ActiveVertex) v).drivingForces.scaleAdd(sum, v.normal, ((ActiveVertex) v).drivingForces);
+            ((ActiveVertex) v).imageForces.add(regionForce);
         }
         
     }
@@ -248,7 +254,7 @@ public class Mesh3D extends ActiveContour
             
             internalForce.scale(weight);
             
-            ((ActiveVertex) v).drivingForces.add(internalForce);
+            ((ActiveVertex) v).internalForces.add(internalForce);
         }
     }
     
@@ -259,24 +265,48 @@ public class Mesh3D extends ActiveContour
         // if (volumeDiff > 0): contour too small, should no longer shrink
         // if (volumeDiff < 0): contour too big, should no longer grow
         
+        Vector3d avgFeedback = new Vector3d();
+        int cpt = 0;
+        
         for (Vertex v : mesh.vertices)
         {
             if (v == null) continue;
             
+            Vector3d feedbackForce = ((ActiveVertex) v).feedbackForces;
+            
             // 2) check whether the final force has same direction as the outer normal
-            double forceNorm = ((ActiveVertex) v).drivingForces.dot(v.normal);
+            double forceNorm = ((ActiveVertex) v).imageForces.dot(v.normal);
             
             // if forces have same direction (forceNorm > 0): contour is growing
             // if forces have opposite direction (forceNorm < 0): contour is shrinking
             
-            if (forceNorm * volumeDiff < 0)
+            // if (forceNorm * volumeDiff < 0)
+            // {
+            // // forceNorm and volumeDiff have opposite signs because:
+            // // - contour too small (volumeDiff > 0) and shrinking (forceNorm < 0)
+            // // or
+            // // - contour too large (volumeDiff < 0) and growing (forceNorm > 0)
+            // // => in both cases, constrain the final force accordingly
+            // ((ActiveVertex) v).drivingForces.scale(1.0 / (1.0 + Math.abs(volumeDiff)));
+            // }
+            
+            // estimate an average feedback
+            if (forceNorm > 0 && volumeDiff < 0)
             {
-                // forceNorm and volumeDiff have opposite signs because:
-                // - contour too small (volumeDiff > 0) and shrinking (forceNorm < 0)
-                // or
-                // - contour too large (volumeDiff < 0) and growing (forceNorm > 0)
-                // => in both cases, constrain the final force accordingly
-                ((ActiveVertex) v).drivingForces.scale(1.0 / (1.0 + Math.abs(volumeDiff)));
+                avgFeedback.add(feedbackForce);
+                cpt++;
+            }
+        }
+        
+        if (avgFeedback.length() > 0)
+        {
+            avgFeedback.scale(1.0 / cpt);
+            avgFeedback.scale(Math.abs(volumeDiff / targetVolume) / 2);
+            
+            // move the entire mesh (ugly, but amazingly efficient!!)
+            for (Vertex v : mesh.vertices)
+            {
+                if (v != null) ((ActiveVertex) v).volumeConstraint.add(avgFeedback);
             }
         }
     }
@@ -296,7 +326,8 @@ public class Mesh3D extends ActiveContour
         target.boundingSphere.getCenter(targetCenter);
         double targetRadius = target.boundingSphere.getRadius();
         
-        double penetration = 0;
+        double feedback = 0;
+        Vector3d feedbackForce = new Vector3d();
         
         int tests = 0;
         
@@ -310,9 +341,11 @@ public class Mesh3D extends ActiveContour
             {
                 tests++;
                 
-                if ((penetration = target.getDistanceToEdge(v.position)) > 0)
+                if ((feedback = target.getDistanceToEdge(v.position)) > 0)
                 {
-                    ((ActiveVertex) v).feedbackForces.scaleAdd(-penetration, v.normal, ((ActiveVertex) v).feedbackForces);
+                    feedbackForce.set(v.normal);
+                    feedbackForce.scale(-feedback * 10);
+                    ((ActiveVertex) v).feedbackForces.add(feedbackForce);
                 }
             }
         }
@@ -531,8 +564,6 @@ public class Mesh3D extends ActiveContour
         Vector3d force = new Vector3d();
         double maxDisp = sampling.getValue() * timeStep;
         
-        Point3d center = new Point3d();
-        
         Point3d p = new Point3d();
         Tuple3d pixelSize = mesh.getPixelSize();
         
@@ -540,30 +571,43 @@ public class Mesh3D extends ActiveContour
         {
             if (v == null) continue;
             
+            ActiveVertex av = (ActiveVertex) v;
+            
+            // get the vertex location in image space
             p.set(v.position.x / pixelSize.x, v.position.y / pixelSize.y, v.position.z / pixelSize.z);
             
             // apply model forces if p lies within the area of interest
-            if (field != null && field.contains(p.x, p.y, p.z, 0, 0))
+            if (field != null && p.z >= 0 && field.contains(p.x, p.y, p.z, 0, 0))
             {
-                force.set(((ActiveVertex) v).drivingForces);
+                if (av.volumeConstraint.length() > 0) av.position.add(av.volumeConstraint);
+                
+                force.set(av.imageForces);
+                
+                force.add(av.internalForces);
+                
+                force.add(av.feedbackForces);
             }
-            
-            // apply feedback forces all the time
-            force.add(((ActiveVertex) v).feedbackForces);
+            else
+            {
+                // force.set(av.imageForces);
+                force.set(av.internalForces);
+                force.scale(0.1);
+            }
             
             force.scale(timeStep);
             
             double disp = force.length();
-            
+            // forces cannot be larger than the max authorized displacement (stability condition)
             if (disp > maxDisp) force.scale(maxDisp / disp);
             
+            // move the vertex
             v.position.add(force);
             
-            center.add(v.position);
-            
             // reset forces
-            ((ActiveVertex) v).drivingForces.set(0, 0, 0);
-            ((ActiveVertex) v).feedbackForces.set(0, 0, 0);
+            av.imageForces.set(0, 0, 0);
+            av.internalForces.set(0, 0, 0);
+            av.feedbackForces.set(0, 0, 0);
+            av.volumeConstraint.set(0, 0, 0);
         }
         
         updateMetaData();
@@ -668,7 +712,7 @@ public class Mesh3D extends ActiveContour
         switch (type)
         {
         case POLYGON: {
-            roi = new ROI3DTriangularMesh(mesh.vertices, mesh.faces, mesh.getPixelSize());
+            roi = mesh.clone();
             break;
         }
         case AREA: {
