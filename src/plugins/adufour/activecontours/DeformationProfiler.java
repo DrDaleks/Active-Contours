@@ -1,5 +1,8 @@
 package plugins.adufour.activecontours;
 
+import icy.file.FileUtil;
+import icy.gui.dialog.SaveDialog;
+import icy.gui.frame.progress.AnnounceFrame;
 import icy.gui.util.GuiUtil;
 import icy.math.ArrayMath;
 import icy.plugin.interface_.PluginBundled;
@@ -9,7 +12,6 @@ import icy.util.XLSUtil;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.io.BufferedWriter;
-import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileWriter;
 import java.io.IOException;
@@ -23,7 +25,6 @@ import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
-import javax.swing.JFileChooser;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.vecmath.Point3d;
@@ -99,8 +100,8 @@ public class DeformationProfiler extends PluginTrackManagerProcessor implements 
     
     public DeformationProfiler()
     {
-        if (preferences == null) preferences = getPreferencesRoot(); 
-                
+        if (preferences == null) preferences = getPreferencesRoot();
+        
         super.getDescriptor().setDescription("Monitor the 3D deformation over time");
         super.setName("3D Deformation Profiler");
         
@@ -140,9 +141,27 @@ public class DeformationProfiler extends PluginTrackManagerProcessor implements 
                 {
                     public void run()
                     {
-                        exportMeshToVTK();
+                        // Restore last used folder
+                        String vtkFolder = preferences.get("vtkFolder", null);
+                        
+                        String path = SaveDialog.chooseFile("Export shape information", vtkFolder, "Mesh");
+                        
+                        if (path == null) return;
+                        
+                        // store the folder in the preferences
+                        preferences.put("vtkFolder", FileUtil.getDirectory(path));
+                        
+                        AnnounceFrame message = new AnnounceFrame("Saving VTK files...", 0);
+                        try
+                        {
+                            exportMeshToVTK(path);
+                        }
+                        finally
+                        {
+                            message.close();
+                        }
                     }
-                }.run();
+                }.start();
             }
         });
         
@@ -154,9 +173,27 @@ public class DeformationProfiler extends PluginTrackManagerProcessor implements 
                 {
                     public void run()
                     {
-                        saveShapeToXLS();
+                        // Restore last used folder
+                        String xlsFolder = preferences.get("xlsFolder", null);
+                        
+                        String path = SaveDialog.chooseFile("Export shape information", xlsFolder, "Shape", ".xls");
+                        
+                        if (path == null) return;
+                        
+                        // store the folder in the preferences
+                        preferences.put("xlsFolder", FileUtil.getDirectory(path));
+                        
+                        AnnounceFrame message = new AnnounceFrame("Saving shape information...", 0);
+                        try
+                        {
+                            exportShapeToXLS(path);
+                        }
+                        finally
+                        {
+                            message.close();
+                        }
                     }
-                }.run();
+                }.start();
             }
         });
         
@@ -246,15 +283,11 @@ public class DeformationProfiler extends PluginTrackManagerProcessor implements 
         super.panel.updateUI();
     }
     
-    private void saveShapeToXLS()
+    private void exportShapeToXLS(String xlsPath)
     {
-        JFileChooser jfc = new JFileChooser();
-        
-        if (jfc.showSaveDialog(null) != JFileChooser.APPROVE_OPTION) return;
-        
         try
         {
-            WritableWorkbook wb = XLSUtil.createWorkbook(jfc.getSelectedFile());
+            WritableWorkbook wb = XLSUtil.createWorkbook(xlsPath);
             
             saveToXls(wb, "Surface area", computeDimension(1));
             saveToXls(wb, "Volume", computeDimension(2));
@@ -276,20 +309,8 @@ public class DeformationProfiler extends PluginTrackManagerProcessor implements 
         }
     }
     
-    private void exportMeshToVTK()
+    private void exportMeshToVTK(String vtkPath)
     {
-        // Restore last used folder
-        String vtkFolder = preferences.get("vtkFolder", null);
-        
-        JFileChooser jfc = new JFileChooser(vtkFolder);
-        
-        if (jfc.showSaveDialog(null) != JFileChooser.APPROVE_OPTION) return;
-        
-        File f = jfc.getSelectedFile();
-        
-        // store the folder in the preferences
-        preferences.put("vtkFolder", f.getParent());
-        
         int cpt = 0;
         for (TrackSegment ts : trackPool.getTrackSegmentList())
         {
@@ -307,7 +328,7 @@ public class DeformationProfiler extends PluginTrackManagerProcessor implements 
                 {
                     if (det.getDetectionType() != Detection.DETECTIONTYPE_VIRTUAL_DETECTION)
                     {
-                        BufferedWriter writer = new BufferedWriter(new FileWriter(f.getAbsolutePath() + fileName));
+                        BufferedWriter writer = new BufferedWriter(new FileWriter(vtkPath + fileName));
                         ((Mesh3D) det).mesh.saveToVTK(writer);
                     }
                 }
