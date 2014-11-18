@@ -440,6 +440,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         }
         
         // if (!globalStop)
+        if (isHeadLess() || output_rois.getValue() != ExportROI.NO)
         {
             // remove the painter after processing
             if (overlay != null) overlay.remove();
@@ -1281,8 +1282,6 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             {
                 throw new IcyHandledException("3D meshes cannot be exported as polygons (yet). Please select \"Area\" instead.");
             }
-            // raster data
-            // contour.toSequence(binSeq, i);
         }
         
         // if (!Icy.isHeadLess() && t==1) addSequence(binSeq);

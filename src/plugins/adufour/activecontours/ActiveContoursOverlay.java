@@ -3,16 +3,21 @@ package plugins.adufour.activecontours;
 import icy.canvas.IcyCanvas;
 import icy.painter.Overlay;
 import icy.sequence.Sequence;
+import icy.sequence.SequenceEvent;
+import icy.sequence.SequenceEvent.SequenceEventSourceType;
+import icy.sequence.SequenceEvent.SequenceEventType;
+import icy.sequence.SequenceListener;
 
 import java.awt.Graphics2D;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.ConcurrentModificationException;
 
 import plugins.fab.trackmanager.TrackGroup;
 import plugins.fab.trackmanager.TrackSegment;
 import plugins.nchenouard.spot.Detection;
 
-public class ActiveContoursOverlay extends Overlay
+public class ActiveContoursOverlay extends Overlay implements SequenceListener
 {
     private TrackGroup trackGroup;
     
@@ -25,6 +30,9 @@ public class ActiveContoursOverlay extends Overlay
     @Override
     public void paint(Graphics2D g, Sequence sequence, IcyCanvas canvas)
     {
+        if (!Arrays.asList(sequence.getListeners()).contains(this))
+            sequence.addListener(this);
+        
         int t = canvas.getPositionT();
         
         ArrayList<TrackSegment> segments = new ArrayList<TrackSegment>(trackGroup.getTrackSegmentList());
@@ -86,5 +94,24 @@ public class ActiveContoursOverlay extends Overlay
         }
         
         super.remove();
+    }
+
+    @Override
+    public void sequenceChanged(SequenceEvent sequenceEvent)
+    {
+        if (sequenceEvent.getSourceType() != SequenceEventSourceType.SEQUENCE_OVERLAY) return;
+        
+        if (sequenceEvent.getSource() == this && sequenceEvent.getType() == SequenceEventType.REMOVED)
+        {
+            sequenceEvent.getSequence().removeListener(this);
+            remove();
+        }
+    }
+
+    @Override
+    public void sequenceClosed(Sequence sequence)
+    {
+        sequence.removeListener(this);
+        remove();
     }
 }
