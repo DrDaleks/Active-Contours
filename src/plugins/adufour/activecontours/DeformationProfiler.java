@@ -45,8 +45,8 @@ import org.jfree.data.xy.XYSeries;
 import org.jfree.data.xy.XYSeriesCollection;
 
 import plugins.adufour.quickhull.QuickHull3D;
-import plugins.adufour.roi3d.mesh.surface.ROI3DTriangularMesh;
-import plugins.adufour.roi3d.mesh.surface.Vertex;
+import plugins.adufour.roi3d.mesh.Vertex3D;
+import plugins.adufour.roi3d.mesh.polygon.ROI3DTriangularMesh;
 import plugins.fab.trackmanager.PluginTrackManagerProcessor;
 import plugins.fab.trackmanager.TrackSegment;
 import plugins.nchenouard.spot.Detection;
@@ -571,18 +571,18 @@ public class DeformationProfiler extends PluginTrackManagerProcessor implements 
                         int n = 0;
                         
                         // compute local roughness for each mesh point
-                        for (Vertex v1 : mesh.vertices)
+                        for (Vertex3D v1 : mesh.vertices)
                         {
                             if (v1 == null) continue;
                             
                             // 1) Build a neighborhood for each vertex w.r.t. the sampling distance
-                            ArrayList<Vertex> neighborhood = new ArrayList<Vertex>();
+                            ArrayList<Vertex3D> neighborhood = new ArrayList<Vertex3D>();
                             // neighborhood.add(v1);
                             
                             // add the first ring of neighbors
                             for (Integer n1 : v1.neighbors)
                             {
-                                Vertex vn1 = mesh.vertices.get(n1);
+                                Vertex3D vn1 = mesh.vertices.get(n1);
                                 if (vn1 == null || vn1 == v1 || neighborhood.contains(vn1)) continue;
                                 
                                 neighborhood.add(vn1);
@@ -590,7 +590,7 @@ public class DeformationProfiler extends PluginTrackManagerProcessor implements 
                                 // add the second ring of neighbors
                                 for (Integer n2 : vn1.neighbors)
                                 {
-                                    Vertex vn2 = mesh.vertices.get(n2);
+                                    Vertex3D vn2 = mesh.vertices.get(n2);
                                     if (vn2 == null || vn2 == v1 || vn2 == vn1 || neighborhood.contains(vn2)) continue;
                                     
                                     neighborhood.add(vn2);
