@@ -11,6 +11,6 @@
 	<classpathentry kind="src" path="/HK-Means"/>
 	<classpathentry combineaccessrules="false" kind="src" path="/Connected-Components"/>
 	<classpathentry kind="var" path="ICY_HOME/icy.jar"/>
-	<classpathentry kind="src" path="/ConvexHull"/>
+	<classpathentry kind="src" path="/QuickHull"/>
 	<classpathentry kind="output" path="bin"/>
 </classpath>
