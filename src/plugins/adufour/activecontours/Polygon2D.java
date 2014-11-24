@@ -34,6 +34,7 @@ import javax.vecmath.Point3d;
 import javax.vecmath.Vector3d;
 
 import plugins.adufour.activecontours.ActiveContours.ROIType;
+import plugins.adufour.activecontours.SlidingWindow.Operation;
 import plugins.adufour.morphology.FillHolesInROI;
 import plugins.adufour.vars.lang.Var;
 import plugins.adufour.vars.lang.VarDouble;
@@ -134,12 +135,12 @@ public class Polygon2D extends ActiveContour
         
         updateNormals();
         
-        // artifically grow the contour by a tiny bit
-        for (int i = 0; i < n; i++)
-        {
-            Point3d p = points.get(i);
-            p.scaleAdd(2.0, contourNormals[i], p);
-        }
+        // // artifically grow the contour by a tiny bit
+        // for (int i = 0; i < n; i++)
+        // {
+        // Point3d p = points.get(i);
+        // p.scaleAdd(2.0, contourNormals[i], p);
+        // }
         
         updatePath();
         counterClockWise = contour.counterClockWise;
@@ -1049,6 +1050,13 @@ public class Polygon2D extends ActiveContour
         
         convergence.push(getDimension(2));
         
+    }
+    
+    @Override
+    public boolean hasConverged(Operation operation, double epsilon)
+    {
+        Double value = convergence.computeCriterion(operation);
+        return value != null && value <= epsilon / 100;
     }
     
     AnnounceFrame f = null; // new AnnounceFrame("ready");

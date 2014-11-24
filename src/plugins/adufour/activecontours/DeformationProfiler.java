@@ -11,9 +11,7 @@ import icy.util.XLSUtil;
 
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
-import java.io.BufferedWriter;
-import java.io.FileNotFoundException;
-import java.io.FileWriter;
+import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -45,8 +43,8 @@ import org.jfree.data.xy.XYSeries;
 import org.jfree.data.xy.XYSeriesCollection;
 
 import plugins.adufour.quickhull.QuickHull3D;
-import plugins.adufour.roi3d.mesh.Vertex3D;
-import plugins.adufour.roi3d.mesh.polygon.ROI3DTriangularMesh;
+import plugins.adufour.roi.mesh.Vertex3D;
+import plugins.adufour.roi.mesh.polygon.ROI3DTriangularMesh;
 import plugins.fab.trackmanager.PluginTrackManagerProcessor;
 import plugins.fab.trackmanager.TrackSegment;
 import plugins.nchenouard.spot.Detection;
@@ -324,21 +322,10 @@ public class DeformationProfiler extends PluginTrackManagerProcessor implements 
                 
                 int t = det.getT();
                 String fileName = filePrefix + "_T" + (t < 10 ? "000" : t < 100 ? "00" : t < 1000 ? "0" : "") + t + ".vtk";
-                try
+                
+                if (det.getDetectionType() != Detection.DETECTIONTYPE_VIRTUAL_DETECTION)
                 {
-                    if (det.getDetectionType() != Detection.DETECTIONTYPE_VIRTUAL_DETECTION)
-                    {
-                        BufferedWriter writer = new BufferedWriter(new FileWriter(vtkPath + fileName));
-                        ((Mesh3D) det).mesh.saveToVTK(writer);
-                    }
-                }
-                catch (FileNotFoundException e)
-                {
-                    e.printStackTrace();
-                }
-                catch (IOException e)
-                {
-                    e.printStackTrace();
+                    ((Mesh3D) det).mesh.saveToVTK(new File(fileName));
                 }
             }
             
@@ -566,12 +553,12 @@ public class DeformationProfiler extends PluginTrackManagerProcessor implements 
                     {
                         // Point3d center = contour.getMassCenter();
                         
-                        double[] localRoughness = new double[(int) mesh.getNorm(0)];
+                        double[] localRoughness = new double[mesh.getNumberOfVertices(true)];
                         
                         int n = 0;
                         
                         // compute local roughness for each mesh point
-                        for (Vertex3D v1 : mesh.vertices)
+                        for (Vertex3D v1 : mesh.getVertices())
                         {
                             if (v1 == null) continue;
                             
@@ -582,16 +569,16 @@ public class DeformationProfiler extends PluginTrackManagerProcessor implements 
                             // add the first ring of neighbors
                             for (Integer n1 : v1.neighbors)
                             {
-                                Vertex3D vn1 = mesh.vertices.get(n1);
-                                if (vn1 == null || vn1 == v1 || neighborhood.contains(vn1)) continue;
+                                Vertex3D vn1 = mesh.getVertex(n1);
+                                if (vn1 == v1 || neighborhood.contains(vn1)) continue;
                                 
                                 neighborhood.add(vn1);
                                 
                                 // add the second ring of neighbors
                                 for (Integer n2 : vn1.neighbors)
                                 {
-                                    Vertex3D vn2 = mesh.vertices.get(n2);
-                                    if (vn2 == null || vn2 == v1 || vn2 == vn1 || neighborhood.contains(vn2)) continue;
+                                    Vertex3D vn2 = mesh.getVertex(n2);
+                                    if (vn2 == v1 || vn2 == vn1 || neighborhood.contains(vn2)) continue;
                                     
                                     neighborhood.add(vn2);
                                 }

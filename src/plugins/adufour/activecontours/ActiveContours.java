@@ -1,5 +1,7 @@
 package plugins.adufour.activecontours;
 
+import icy.gui.viewer.Viewer;
+import icy.image.IcyBufferedImage;
 import icy.main.Icy;
 import icy.math.ArrayMath;
 import icy.painter.Overlay;
@@ -64,10 +66,12 @@ import plugins.adufour.hierarchicalkmeans.HierarchicalKMeans;
 import plugins.adufour.vars.lang.Var;
 import plugins.adufour.vars.lang.VarBoolean;
 import plugins.adufour.vars.lang.VarROIArray;
+import plugins.adufour.vars.lang.VarSequence;
 import plugins.adufour.vars.util.VarException;
 import plugins.fab.trackmanager.TrackGroup;
 import plugins.fab.trackmanager.TrackManager;
 import plugins.fab.trackmanager.TrackSegment;
+import plugins.kernel.canvas.VtkCanvas;
 import plugins.kernel.roi.roi2d.ROI2DArea;
 import plugins.kernel.roi.roi2d.ROI2DRectangle;
 import plugins.kernel.roi.roi3d.ROI3DArea;
@@ -122,6 +126,8 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     public final EzVarEnum<ExportROI>           output_rois             = new EzVarEnum<ExportROI>("Export ROI", ExportROI.values(), ExportROI.NO);
     public final EzVarEnum<ROIType>             output_roiType          = new EzVarEnum<ROIType>("Type of ROI", ROIType.values(), ROIType.AREA);
     
+    private VarSequence                         output_labels           = new VarSequence("Labels", null);
+    
     public final EzVarBoolean                   tracking                = new EzVarBoolean("Track objects over time", false);
     
     public final EzVarBoolean                   tracking_newObjects     = new EzVarBoolean("Watch entering objects", false);
@@ -175,7 +181,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     
     private ActiveContoursOverlay               overlay;
     
-    private Processor                           multiThreadService      = new Processor(SystemUtil.getAvailableProcessors());
+    private Processor                           multiThreadService      = new Processor(SystemUtil.getNumberOfCPUs());
     
     public ActiveContours()
     {
@@ -308,7 +314,28 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         {
             if (isHeadLess()) System.out.println("Processing frame #" + t);
             
-            if (inputData.getFirstViewer() != null) inputData.getFirstViewer().setPositionT(t);
+            if (inputData.getFirstViewer() != null)
+            {
+                Viewer viewer = inputData.getFirstViewer();
+                viewer.setPositionT(t);
+                if (viewer.getCanvas() instanceof VtkCanvas)
+                {
+                    final VtkCanvas vtk = (VtkCanvas) viewer.getCanvas();
+                    if (vtk.getVolumeSample() < 2)
+                    {
+                        ThreadUtil.invokeLater(new Runnable()
+                        {
+                            public void run()
+                            {
+                                // it is almost impossible that the rendering is smooth
+                                // (it's ray-casting after all!)
+                                // decrease it for faster rendering
+                                vtk.setVolumeSample(5);
+                            }
+                        });
+                    }
+                }
+            }
             
             if (isHeadLess()) System.out.println("=> retrieving image data...");
             initData(t, t == startT);
@@ -812,9 +839,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             evolvingContoursAtTimeT.clear();
             for (ActiveContour contour : allContoursAtTimeT)
             {
-                Double criterion = contour.convergence.computeCriterion(convergence_operation.getValue());
-                
-                if (criterion != null && criterion <= convergence_criterion.getValue() / 100)
+                if (contour.hasConverged(convergence_operation.getValue(), convergence_criterion.getValue()))
                 {
                     nbConvergedContours++;
                     continue;
@@ -1268,23 +1293,31 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             }
             
             // output as ROIs
-            try
+            ROI roi = contour.toROI(output_roiType.getValue(), inputData);
+            if (roi != null)
             {
-                ROI roi = contour.toROI(output_roiType.getValue(), inputData);
-                if (roi != null)
-                {
-                    roi.setName("Object #" + StringUtil.toString(i, nbPaddingDigits + 1));
-                    roi.setColor(contour.getColor());
-                    rois.add(roi);
-                }
+                roi.setName("Object #" + StringUtil.toString(i, nbPaddingDigits + 1));
+                roi.setColor(contour.getColor());
+                rois.add(roi);
             }
-            catch (UnsupportedOperationException unsupported)
+            
+            // output labels
+            if (output_labels.isReferenced())
             {
-                throw new IcyHandledException("3D meshes cannot be exported as polygons (yet). Please select \"Area\" instead.");
+                Sequence binSeq = output_labels.getValue();
+                if (binSeq == null)
+                {
+                    output_labels.setValue(binSeq = new Sequence());
+                }
+                if (binSeq.getImage(t, (int) contour.getZ()) == null)
+                {
+                    binSeq.setImage(t, (int) contour.getZ(), new IcyBufferedImage(inputData.getWidth(), inputData.getHeight(), 1, DataType.USHORT));
+                }
+                contour.toSequence(binSeq, i);
             }
         }
         
-        // if (!Icy.isHeadLess() && t==1) addSequence(binSeq);
+        if (output_labels.getValue() != null) output_labels.getValue().dataChanged();
         
         if (rois.size() > 0) roiOutput.setValue(rois.toArray(new ROI[0]));
         
@@ -1359,6 +1392,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     {
         outputMap.add(roiOutput);
         outputMap.add(trackGroup);
+        outputMap.add(output_labels);
     }
     
 }

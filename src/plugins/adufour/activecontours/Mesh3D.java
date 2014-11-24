@@ -17,9 +17,10 @@ import javax.vecmath.Vector3d;
 import org.w3c.dom.Node;
 
 import plugins.adufour.activecontours.ActiveContours.ROIType;
-import plugins.adufour.roi3d.mesh.MeshTopologyException;
-import plugins.adufour.roi3d.mesh.Vertex3D;
-import plugins.adufour.roi3d.mesh.polygon.ROI3DTriangularMesh;
+import plugins.adufour.activecontours.SlidingWindow.Operation;
+import plugins.adufour.roi.mesh.MeshTopologyException;
+import plugins.adufour.roi.mesh.Vertex3D;
+import plugins.adufour.roi.mesh.polygon.ROI3DTriangularMesh;
 import plugins.adufour.vars.lang.Var;
 import plugins.adufour.vars.lang.VarDouble;
 import plugins.kernel.roi.roi3d.ROI3DArea;
@@ -54,6 +55,12 @@ public class Mesh3D extends ActiveContour
         public ActiveVertex(Point3d position, int nbNeighbors)
         {
             super(position, nbNeighbors);
+        }
+        
+        @Override
+        public Vertex3D clone()
+        {
+            return new ActiveVertex(this);
         }
     }
     
@@ -130,7 +137,7 @@ public class Mesh3D extends ActiveContour
         // To drive the contour along the main object axis, each displacement
         // vector is scaled by the scalar product between its normal and the main axis.
         
-        for (Vertex3D v : mesh.vertices)
+        for (Vertex3D v : mesh.getVertices())
         {
             if (v == null) continue;
             
@@ -147,7 +154,7 @@ public class Mesh3D extends ActiveContour
     @Override
     void computeBalloonForces(double weight)
     {
-        for (Vertex3D v : mesh.vertices)
+        for (Vertex3D v : mesh.getVertices())
         {
             if (v == null) continue;
             
@@ -172,7 +179,7 @@ public class Mesh3D extends ActiveContour
         double pixelSizeY = edgeData.getPixelSizeY();
         double pixelSizeZ = edgeData.getPixelSizeZ();
         
-        for (Vertex3D v : mesh.vertices)
+        for (Vertex3D v : mesh.getVertices())
         {
             if (v == null) continue;
             
@@ -213,7 +220,7 @@ public class Mesh3D extends ActiveContour
         
         double val, inDiff, outDiff;
         
-        for (Vertex3D v : mesh.vertices)
+        for (Vertex3D v : mesh.getVertices())
         {
             if (v == null) continue;
             
@@ -243,14 +250,14 @@ public class Mesh3D extends ActiveContour
         
         weight /= sampling.getValue();
         
-        for (Vertex3D v : mesh.vertices)
+        for (Vertex3D v : mesh.getVertices())
         {
             if (v == null) continue;
             
             internalForce.scale(-v.neighbors.size(), v.position);
             
             for (Integer nn : v.neighbors)
-                internalForce.add(mesh.vertices.get(nn).position);
+                internalForce.add(mesh.getVertex(nn).position);
             
             internalForce.scale(weight);
             
@@ -268,7 +275,7 @@ public class Mesh3D extends ActiveContour
         Vector3d avgFeedback = new Vector3d();
         int cpt = 0;
         
-        for (Vertex3D v : mesh.vertices)
+        for (Vertex3D v : mesh.getVertices())
         {
             if (v == null) continue;
             
@@ -301,10 +308,10 @@ public class Mesh3D extends ActiveContour
         if (avgFeedback.length() > 0)
         {
             avgFeedback.scale(1.0 / cpt);
-            avgFeedback.scale(Math.abs(volumeDiff / targetVolume) / 2);
+            avgFeedback.scale(Math.abs(volumeDiff / targetVolume) / 1.5);
             
             // move the entire mesh (ugly, but amazingly efficient!!)
-            for (Vertex3D v : mesh.vertices)
+            for (Vertex3D v : mesh.getVertices())
             {
                 if (v != null) ((ActiveVertex) v).volumeConstraint.add(avgFeedback);
             }
@@ -331,7 +338,7 @@ public class Mesh3D extends ActiveContour
         
         int tests = 0;
         
-        for (Vertex3D v : mesh.vertices)
+        for (Vertex3D v : mesh.getVertices())
         {
             if (v == null) continue;
             
@@ -355,7 +362,7 @@ public class Mesh3D extends ActiveContour
     
     public double getCurvature(Point3d pt)
     {
-        for (Vertex3D v : mesh.vertices)
+        for (Vertex3D v : mesh.getVertices())
         {
             if (v == null) continue;
             
@@ -365,7 +372,7 @@ public class Mesh3D extends ActiveContour
             Vector3d diff = new Vector3d();
             for (Integer n : v.neighbors)
             {
-                Point3d neighbor = mesh.vertices.get(n).position;
+                Point3d neighbor = mesh.getVertex(n).position;
                 diff.sub(neighbor, pt);
                 sum.add(diff);
             }
@@ -379,7 +386,13 @@ public class Mesh3D extends ActiveContour
     
     public double getDimension(int order)
     {
-        return mesh.getNorm(order);
+        switch(order)
+        {
+        case 0: return mesh.getNumberOfVertices(true);
+        case 1: return mesh.getNumberOfContourPoints();
+        case 2: return mesh.getNumberOfPoints();
+        }
+        return Double.NaN;
     }
     
     Point3d getMassCenter(boolean convertToImageSpace)
@@ -393,37 +406,7 @@ public class Mesh3D extends ActiveContour
      */
     public Vector3d getMajorAxis()
     {
-        Vector3d axis = new Vector3d();
-        int nbPoints = (int) getDimension(0);
-        
-        // TODO this is not optimal, geometric moments should be used
-        
-        double maxDistSq = 0;
-        Vector3d vec = new Vector3d();
-        
-        for (int i = 0; i < nbPoints; i++)
-        {
-            Vertex3D v1 = mesh.vertices.get(i);
-            if (v1 == null) continue;
-            
-            for (int j = i + 1; j < nbPoints; j++)
-            {
-                Vertex3D v2 = mesh.vertices.get(j);
-                if (v2 == null) continue;
-                
-                vec.sub(v1.position, v2.position);
-                
-                double dSq = vec.lengthSquared();
-                
-                if (dSq > maxDistSq)
-                {
-                    maxDistSq = dSq;
-                    axis.set(vec);
-                }
-            }
-        }
-        
-        return axis;
+        return mesh.getMajorAxis();
     }
     
     /**
@@ -518,7 +501,7 @@ public class Mesh3D extends ActiveContour
         
         return new Iterator<Point3d>()
         {
-            Iterator<Vertex3D> vertexIterator       = mesh.vertices.iterator();
+            Iterator<Vertex3D> vertexIterator       = mesh.getVertices().iterator();
             
             Vertex3D           next;
             
@@ -567,7 +550,7 @@ public class Mesh3D extends ActiveContour
         Point3d p = new Point3d();
         Tuple3d pixelSize = mesh.getPixelSize();
         
-        for (Vertex3D v : mesh.vertices)
+        for (Vertex3D v : mesh.getVertices())
         {
             if (v == null) continue;
             
@@ -615,10 +598,18 @@ public class Mesh3D extends ActiveContour
         // compute some convergence criterion
         
         if (convergence == null) return;
-        
-        convergence.push(getDimension(2));
+
+        convergence.push(mesh.getNumberOfPoints());
     }
     
+    @Override
+    public boolean hasConverged(Operation operation, double epsilon)
+    {
+        Double value = convergence.computeCriterion(operation);
+        return value != null && value <= epsilon / 10;
+    }
+    
+
     @Override
     protected void updateMetaData()
     {
@@ -674,7 +665,7 @@ public class Mesh3D extends ActiveContour
     @Override
     protected void addPoint(Point3d p)
     {
-        mesh.addVertex(p);
+        mesh.addVertex(mesh.createVertex(p));
     }
     
     @Override
@@ -743,7 +734,7 @@ public class Mesh3D extends ActiveContour
     @Override
     protected void clean()
     {
-        mesh.remove();
+        mesh.remove(false);
     }
     
     @Override

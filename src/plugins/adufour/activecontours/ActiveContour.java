@@ -24,7 +24,7 @@ import plugins.nchenouard.spot.Detection;
  */
 public abstract class ActiveContour extends Detection implements Iterable<Point3d>
 {
-    protected final Processor      processor      = new Processor(SystemUtil.getAvailableProcessors() * 2);
+    protected final Processor      processor      = new Processor(SystemUtil.getNumberOfCPUs() * 2);
     
     protected SlidingWindow        convergence;
     
@@ -291,4 +291,11 @@ public abstract class ActiveContour extends Detection implements Iterable<Point3
      * overlays)
      */
     protected abstract void clean();
+    
+    /**
+     * @param epsilon
+     *            the convergence threshold
+     * @return <code>true</code> if the contour has converged
+     */
+    public abstract boolean hasConverged(SlidingWindow.Operation operation, double epsilon);
 }
