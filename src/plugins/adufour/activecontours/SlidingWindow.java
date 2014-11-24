@@ -75,7 +75,7 @@ public class SlidingWindow
     
     public Double computeCriterion(Operation operation)
     {
-        if (count < window.length) return null;
+        if (count < window.length * 2) return null;
         
         switch (operation)
         {
