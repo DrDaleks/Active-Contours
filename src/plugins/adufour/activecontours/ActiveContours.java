@@ -74,7 +74,6 @@ import plugins.fab.trackmanager.TrackSegment;
 import plugins.kernel.canvas.VtkCanvas;
 import plugins.kernel.roi.roi2d.ROI2DArea;
 import plugins.kernel.roi.roi2d.ROI2DRectangle;
-import plugins.kernel.roi.roi3d.ROI3DArea;
 import plugins.kernel.roi.roi3d.ROI3DStack;
 import plugins.nchenouard.spot.Detection;
 
@@ -734,37 +733,27 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 {
                     public void run()
                     {
-                        if (r3 instanceof ROI3DArea)
+                        final SlidingWindow window = new SlidingWindow(convergence_winSize.getValue());
+                        final ActiveContour contour = new Mesh3D(contour_resolution.getVariable(), pixelSize, r3, window);
+                        // contour.setX(r3.getBounds3D().getCenterX());
+                        // contour.setY(r3.getBounds3D().getCenterY());
+                        contour.setT(t);
+                        
+                        // contour.toSequence(inputData, 3000);
+                        
+                        TrackSegment segment = new TrackSegment();
+                        segment.addDetection(contour);
+                        synchronized (trackGroup)
                         {
-                            // TODO special case: split if the area has multiple components
-                            ROI3DArea area3D = (ROI3DArea) r3;
-                            
-                            final SlidingWindow window = new SlidingWindow(convergence_winSize.getValue());
-                            final ActiveContour contour = new Mesh3D(contour_resolution.getVariable(), pixelSize, r3, window);
-                            // contour.setX(r3.getBounds3D().getCenterX());
-                            // contour.setY(r3.getBounds3D().getCenterY());
-                            contour.setT(t);
-                            
-                            // contour.toSequence(inputData, 3000);
-                            
-                            TrackSegment segment = new TrackSegment();
-                            segment.addDetection(contour);
-                            synchronized (trackGroup)
-                            {
-                                trackGroup.getValue().addTrackSegment(segment);
-                            }
-                            synchronized (region_cin)
-                            {
-                                region_cin.put(segment, 0.0);
-                            }
-                            synchronized (region_cout)
-                            {
-                                region_cout.put(segment, 0.0);
-                            }
+                            trackGroup.getValue().addTrackSegment(segment);
                         }
-                        else
+                        synchronized (region_cin)
                         {
-                            System.out.println("Skipping non-area-like 3D ROI");
+                            region_cin.put(segment, 0.0);
+                        }
+                        synchronized (region_cout)
+                        {
+                            region_cout.put(segment, 0.0);
                         }
                     }
                 };
