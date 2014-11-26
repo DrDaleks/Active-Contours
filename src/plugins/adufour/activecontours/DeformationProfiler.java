@@ -325,7 +325,7 @@ public class DeformationProfiler extends PluginTrackManagerProcessor implements 
                 
                 if (det.getDetectionType() != Detection.DETECTIONTYPE_VIRTUAL_DETECTION)
                 {
-                    ((Mesh3D) det).mesh.saveToVTK(new File(fileName));
+                    ((Mesh3D) det).mesh.saveToVTK(new File(vtkPath + fileName));
                 }
             }
             
