@@ -339,6 +339,8 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             if (isHeadLess()) System.out.println("=> retrieving image data...");
             initData(t, t == startT);
             
+            if (Thread.currentThread().isInterrupted()) break;
+            
             if (isHeadLess()) System.out.println("=> creating contours...");
             initContours(t, t == startT);
             
@@ -359,7 +361,10 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             // evolve contours on the current image
             evolveContours(t);
             
-            if (Thread.currentThread().isInterrupted()) break;
+            if (Thread.currentThread().isInterrupted())
+            {
+                break;
+            }
             
             if (isHeadLess()) System.out.println("=> Storing result...");
             
@@ -771,7 +776,6 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         {
             // restore the interrupted flag
             Thread.currentThread().interrupt();
-            return;
         }
         catch (Exception e)
         {
@@ -875,8 +879,6 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             // compute energy
             // computeEnergy(mainService, allContours);
             
-            if (Thread.currentThread().isInterrupted()) globalStop = true;
-            
             if (!Icy.getMainInterface().isHeadLess())
             {
                 overlay.painterChanged();
@@ -889,9 +891,14 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             }
             
             iter++;
+            
+            if (Thread.currentThread().isInterrupted())
+            {
+                globalStop = true;
+            }
         }
         
-        System.out.println("[Active Contours] Converged on frame " + t + " in " + iter + " iterations");
+        //System.out.println("[Active Contours] Converged on frame " + t + " in " + iter + " iterations");
     }
     
     /**
@@ -1037,7 +1044,6 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             }
             catch (InterruptedException e)
             {
-                // reset the interrupted flag
                 Thread.currentThread().interrupt();
                 return;
             }
@@ -1105,7 +1111,6 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 }
                 catch (InterruptedException e)
                 {
-                    // reset the interrupted flag
                     Thread.currentThread().interrupt();
                 }
                 catch (ExecutionException e)
@@ -1117,10 +1122,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 {
                     throw e;
                 }
-                finally
-                {
-                    tasks.clear();
-                }
+                
             }
         }
         
@@ -1326,12 +1328,6 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         
         // meanUpdateService.shutdownNow();
         multiThreadService.shutdownNow();
-    }
-    
-    @Override
-    public void stopExecution()
-    {
-        globalStop = true;
     }
     
     @Override
