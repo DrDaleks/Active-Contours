@@ -103,6 +103,8 @@ public class Polygon2D extends ActiveContour
     
     private Vector3d[]           feedbackForces;
     
+    private Vector3d[]           volumeConstraintForces;
+    
     private boolean              counterClockWise;
     
     protected Polygon2D(Var<Double> sampling, SlidingWindow convergenceWindow)
@@ -211,12 +213,14 @@ public class Polygon2D extends ActiveContour
                 modelForces = new Vector3d[nbPoints];
                 contourNormals = new Vector3d[nbPoints];
                 feedbackForces = new Vector3d[nbPoints];
+                volumeConstraintForces = new Vector3d[nbPoints];
                 
                 for (int i = 0; i < nbPoints; i++)
                 {
                     modelForces[i] = new Vector3d();
                     contourNormals[i] = new Vector3d();
                     feedbackForces[i] = new Vector3d();
+                    volumeConstraintForces[i] = new Vector3d();
                 }
             }
             
@@ -665,23 +669,46 @@ public class Polygon2D extends ActiveContour
         
         int n = points.size();
         
+        Vector3d avgFeedback = new Vector3d();
+        int cpt = 0;
+        
         for (int i = 0; i < n; i++)
         {
             Vector3d mf = modelForces[i];
             
             // 2) check whether the final force has same direction as the outer normal
             double forceNorm = mf.dot(contourNormals[i]);
+            
             // if forces have same direction (forceNorm > 0): contour is growing
             // if forces have opposite direction (forceNorm < 0): contour is shrinking
             
-            if (forceNorm * volumeDiff < 0)
+            // if (forceNorm * volumeDiff < 0)
+            // {
+            // // forceNorm and volumeDiff have opposite signs because:
+            // // - contour too small (volumeDiff > 0) and shrinking (forceNorm < 0)
+            // // or
+            // // - contour too large (volumeDiff < 0) and growing (forceNorm > 0)
+            // // => in both cases, constrain the final force accordingly
+            // mf.scale(1.0 / (1.0 + Math.abs(volumeDiff) / 10));
+            // }
+            
+            // estimate an average feedback
+            if (forceNorm > 0 && volumeDiff < 0)
             {
-                // forceNorm and volumeDiff have opposite signs because:
-                // - contour too small (volumeDiff > 0) and shrinking (forceNorm < 0)
-                // or
-                // - contour too large (volumeDiff < 0) and growing (forceNorm > 0)
-                // => in both cases, constrain the final force accordingly
-                mf.scale(1.0 / (1.0 + Math.abs(volumeDiff) / 10));
+                avgFeedback.add(feedbackForces[i]);
+                cpt++;
+            }
+        }
+        
+        if (avgFeedback.length() > 0)
+        {
+            avgFeedback.scale(1.0 / cpt);
+            avgFeedback.scale(Math.abs(volumeDiff / targetVolume) / 1.5);
+            
+            // move the entire mesh (ugly, but amazingly efficient!!)
+            for (int i = 0; i < n; i++)
+            {
+                volumeConstraintForces[i].add(avgFeedback);
             }
         }
     }
@@ -1010,6 +1037,8 @@ public class Polygon2D extends ActiveContour
         {
             Point3d p = points.get(index);
             
+            if (volumeConstraintForces[index].length() > 0) p.add(volumeConstraintForces[index]);
+            
             // apply model forces if p lies within the area of interest
             if (field != null && field.contains(p.x, p.y, 0, 0, 0) && modelForces[index] != null)
             {
@@ -1037,6 +1066,7 @@ public class Polygon2D extends ActiveContour
             
             modelForces[index].set(0, 0, 0);
             feedbackForces[index].set(0, 0, 0);
+            volumeConstraintForces[index].set(0, 0, 0);
         }
         
         updateMetaData();
@@ -1197,12 +1227,14 @@ public class Polygon2D extends ActiveContour
             modelForces = new Vector3d[nbPoints];
             contourNormals = new Vector3d[nbPoints];
             feedbackForces = new Vector3d[nbPoints];
+            volumeConstraintForces = new Vector3d[nbPoints];
             
             for (int i = 0; i < nbPoints; i++)
             {
                 modelForces[i] = new Vector3d();
                 contourNormals[i] = new Vector3d();
                 feedbackForces[i] = new Vector3d();
+                volumeConstraintForces[i] = new Vector3d();
             }
         }
         

@@ -289,16 +289,6 @@ public class Mesh3D extends ActiveContour
             // if forces have same direction (forceNorm > 0): contour is growing
             // if forces have opposite direction (forceNorm < 0): contour is shrinking
             
-            // if (forceNorm * volumeDiff < 0)
-            // {
-            // // forceNorm and volumeDiff have opposite signs because:
-            // // - contour too small (volumeDiff > 0) and shrinking (forceNorm < 0)
-            // // or
-            // // - contour too large (volumeDiff < 0) and growing (forceNorm > 0)
-            // // => in both cases, constrain the final force accordingly
-            // ((ActiveVertex) v).drivingForces.scale(1.0 / (1.0 + Math.abs(volumeDiff)));
-            // }
-            
             // estimate an average feedback
             if (forceNorm > 0 && volumeDiff < 0)
             {
