@@ -513,61 +513,19 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             System.err.println("Warning: error while smoothing the signal: " + e.getMessage());
         }
         
-        // 1) Initialize the edge data
+        // initialize the mask buffer (used to calculate average intensities inside/outside
+        if (isFirstFrame)
         {
-            if (edge_c.getValue() == region_c.getValue())
-            {
-                // find edges within the region-based information
-                // compute the gradient magnitude
-                
-                // put the X gradient in edgeData, and add the Y gradient into it
-                Sequence gY = SequenceUtil.getCopy(edgeData);
-                
-                try
-                {
-                    Sequence gradient = Kernels1D.GRADIENT.toSequence();
-                    // X
-                    Convolution1D.convolve(edgeData, gradient, null, null);
-                    // Y
-                    Convolution1D.convolve(gY, null, gradient, null);
-                    // TODO Z
-                    
-                    for (int z = 0; z < inputData.getSizeZ(); z++)
-                    {
-                        ArrayMath.abs(edgeData.getDataXYAsFloat(0, z, 0), true);
-                        ArrayMath.abs(gY.getDataXYAsFloat(0, z, 0), true);
-                        // add y into x
-                        ArrayMath.add(edgeData.getDataXYAsFloat(0, z, 0), gY.getDataXYAsFloat(0, z, 0), edgeData.getDataXYAsFloat(0, z, 0));
-                    }
-                    
-                    // rescale to [0-1]
-                    edgeData.updateChannelsBounds(true);
-                    edgeData = SequenceUtil.convertToType(edgeData, edgeData.getDataType_(), true, true);
-                    // addSequence(edgeData);
-                }
-                catch (ConvolutionException e)
-                {
-                    throw new EzException(this, "Cannot smooth the signal: " + e.getMessage(), true);
-                }
-            }
-        }
-        
-        // 2) initialize the region data
-        {
-            // initialize the mask buffer (used to calculate average intensities inside/outside
-            if (isFirstFrame)
-            {
-                Rectangle3D.Integer bounds = new Rectangle3D.Integer();
-                bounds.sizeX = inputData.getSizeX();
-                bounds.sizeY = inputData.getSizeY();
-                bounds.sizeZ = inputData.getSizeZ();
-                BooleanMask2D[] maskSlices = new BooleanMask2D[inputData.getSizeZ()];
-                
-                for (int z = 0; z < inputData.getSizeZ(); z++)
-                    maskSlices[z] = new BooleanMask2D(inputData.getBounds2D(), new boolean[bounds.sizeX * bounds.sizeY]);
-                
-                contourMask_buffer = new BooleanMask3D(bounds, maskSlices);
-            }
+            Rectangle3D.Integer bounds = new Rectangle3D.Integer();
+            bounds.sizeX = inputData.getSizeX();
+            bounds.sizeY = inputData.getSizeY();
+            bounds.sizeZ = inputData.getSizeZ();
+            BooleanMask2D[] maskSlices = new BooleanMask2D[inputData.getSizeZ()];
+            
+            for (int z = 0; z < inputData.getSizeZ(); z++)
+                maskSlices[z] = new BooleanMask2D(inputData.getBounds2D(), new boolean[bounds.sizeX * bounds.sizeY]);
+            
+            contourMask_buffer = new BooleanMask3D(bounds, maskSlices);
         }
     }
     
@@ -898,7 +856,8 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             }
         }
         
-        //System.out.println("[Active Contours] Converged on frame " + t + " in " + iter + " iterations");
+        // System.out.println("[Active Contours] Converged on frame " + t + " in " + iter +
+        // " iterations");
     }
     
     /**
