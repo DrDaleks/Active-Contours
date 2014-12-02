@@ -335,6 +335,11 @@ public class Mesh3D extends ActiveContour
         target.boundingSphere.getCenter(targetCenter);
         double targetRadius = target.boundingSphere.getRadius();
         
+        Point3d lowerBounds = new Point3d();
+        Point3d upperBounds = new Point3d();
+        target.boundingBox.getLower(lowerBounds);
+        target.boundingBox.getUpper(upperBounds);
+        
         double feedback = 0;
         Vector3d feedbackForce = new Vector3d();
         
@@ -343,6 +348,10 @@ public class Mesh3D extends ActiveContour
         for (Vertex3D v : mesh.getVertices())
         {
             if (v == null) continue;
+            
+            if (v.position.x < lowerBounds.x || v.position.y < lowerBounds.y || v.position.z < lowerBounds.z) continue;
+            
+            if (v.position.x > upperBounds.x || v.position.y > upperBounds.y || v.position.z > upperBounds.z) continue;
             
             double distance = v.position.distance(targetCenter);
             
@@ -429,6 +438,11 @@ public class Mesh3D extends ActiveContour
      */
     private float getPixelValue(Sequence data, double x, double y, double z)
     {
+        // "center" the coordinates to the center of the pixel
+        x -= 0.5;
+        y -= 0.5;
+        z -= 0.5;
+        
         int width = data.getSizeX();
         int height = data.getSizeY();
         int depth = data.getSizeZ();

@@ -135,13 +135,6 @@ public class Polygon2D extends ActiveContour
         
         updateNormals();
         
-        // // artifically grow the contour by a tiny bit
-        // for (int i = 0; i < n; i++)
-        // {
-        // Point3d p = points.get(i);
-        // p.scaleAdd(2.0, contourNormals[i], p);
-        // }
-        
         updatePath();
         counterClockWise = contour.counterClockWise;
     }
@@ -837,8 +830,12 @@ public class Polygon2D extends ActiveContour
      */
     private float getPixelValue(float[] data, int width, int height, double x, double y)
     {
-        int i = (int) Math.round(x);
-        int j = (int) Math.round(y);
+        // "center" the coordinates to the center of the pixel
+        x -= 0.5;
+        y -= 0.5;
+        
+        int i = (int) Math.floor(x);
+        int j = (int) Math.floor(y);
         
         // if (i <= 0 || i >= width - 1 || j <= 0 || j >= height - 1) return 0f;
         if (i < 0) i = 0;
