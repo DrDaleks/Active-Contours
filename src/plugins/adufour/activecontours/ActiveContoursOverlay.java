@@ -30,8 +30,7 @@ public class ActiveContoursOverlay extends Overlay implements SequenceListener
     @Override
     public void paint(Graphics2D g, Sequence sequence, IcyCanvas canvas)
     {
-        if (!Arrays.asList(sequence.getListeners()).contains(this))
-            sequence.addListener(this);
+        if (!Arrays.asList(sequence.getListeners()).contains(this)) sequence.addListener(this);
         
         int t = canvas.getPositionT();
         
@@ -79,9 +78,13 @@ public class ActiveContoursOverlay extends Overlay implements SequenceListener
         {
             TrackSegment segment = segments.get(i - 1);
             
+            if (segment == null) continue;
+            
             try
             {
-                for (Detection detection : segment.getDetectionList())
+                ArrayList<Detection> detections = segment.getDetectionList();
+                
+                if (detections != null) for (Detection detection : detections)
                 {
                     ((ActiveContour) detection).clean();
                 }
@@ -95,7 +98,7 @@ public class ActiveContoursOverlay extends Overlay implements SequenceListener
         
         super.remove();
     }
-
+    
     @Override
     public void sequenceChanged(SequenceEvent sequenceEvent)
     {
@@ -107,7 +110,7 @@ public class ActiveContoursOverlay extends Overlay implements SequenceListener
             remove();
         }
     }
-
+    
     @Override
     public void sequenceClosed(Sequence sequence)
     {
