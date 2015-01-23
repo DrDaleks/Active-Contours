@@ -11,6 +11,7 @@ import icy.roi.BooleanMask3D;
 import icy.roi.ROI;
 import icy.roi.ROI2D;
 import icy.roi.ROI3D;
+import icy.roi.ROI4D;
 import icy.roi.ROIUtil;
 import icy.sequence.DimensionId;
 import icy.sequence.Sequence;
@@ -38,6 +39,7 @@ import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
 
 import javax.vecmath.Point3d;
 import javax.vecmath.Tuple3d;
@@ -73,6 +75,7 @@ import plugins.fab.trackmanager.TrackManager;
 import plugins.fab.trackmanager.TrackSegment;
 import plugins.kernel.canvas.VtkCanvas;
 import plugins.kernel.roi.roi2d.ROI2DArea;
+import plugins.kernel.roi.roi2d.ROI2DPolygon;
 import plugins.kernel.roi.roi2d.ROI2DRectangle;
 import plugins.kernel.roi.roi3d.ROI3DStack;
 import plugins.nchenouard.spot.Detection;
@@ -114,12 +117,19 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     
     public enum ExportROI
     {
-        NO, ON_INPUT, ON_NEW_IMAGE
+        NO, ON_INPUT, ON_NEW_IMAGE, TEMPORAL_ROI
     }
     
     public enum ROIType
     {
-        AREA, POLYGON,
+        AREA(ROI2DArea.class), POLYGON(ROI2DPolygon.class);
+        
+        final Class<? extends ROI> clazz;
+        
+        private ROIType(Class<? extends ROI> clazz)
+        {
+            this.clazz = clazz;
+        }
     }
     
     public final EzVarEnum<ExportROI>           output_rois             = new EzVarEnum<ExportROI>("Export ROI", ExportROI.values(), ExportROI.NO);
@@ -167,6 +177,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     private boolean                             globalStop;
     
     private Var<TrackGroup>                     trackGroup              = new Var<TrackGroup>("Tracks", TrackGroup.class);
+    private final HashMap<TrackSegment, ROI4D>  temporalROIs            = new HashMap<TrackSegment, ROI4D>(0);
     
     /**
      * All contours present on the current time point
@@ -258,7 +269,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         addEzComponent(output_rois);
         output_roiType.setToolTipText("Select the type of ROI to export");
         addEzComponent(output_roiType);
-        output_rois.addVisibilityTriggerTo(output_roiType, ExportROI.ON_INPUT, ExportROI.ON_NEW_IMAGE);
+        output_rois.addVisibilityTriggerTo(output_roiType, ExportROI.ON_INPUT, ExportROI.ON_NEW_IMAGE, ExportROI.TEMPORAL_ROI);
         
         tracking.setToolTipText("Track objects over time (no export)");
         addEzComponent(tracking);
@@ -459,7 +470,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             
             if (output_rois.getValue() != ExportROI.NO)
             {
-                Sequence out = output_rois.getValue() == ExportROI.ON_INPUT ? inputData : SequenceUtil.getCopy(inputData);
+                Sequence out = output_rois.getValue() == ExportROI.ON_NEW_IMAGE ? SequenceUtil.getCopy(inputData) : inputData;
                 
                 if (out != inputData) out.setName(inputData.getName() + " + Active contours");
                 
@@ -614,7 +625,11 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                     // merely a slice of it => which one?
                     if (getUI() != null)
                     {
-                        roi2d.setZ(inputData.getFirstViewer().getPositionZ());
+                        int currentVisibleSlice = inputData.getFirstViewer().getPositionZ();
+                        
+                        if (currentVisibleSlice == -1) throw new EzException(this, "Please select a 2D slice (using a 2D viewer) where the contour should operate", true);
+                        
+                        roi2d.setZ(currentVisibleSlice);
                     }
                     else
                     {
@@ -763,7 +778,15 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         
         if (boundSource != null && boundSource.getROIs().size() > 0)
         {
-            field = ROIUtil.merge(boundSource.getROIs(), BooleanOperator.OR);
+            try
+            {
+                field = ROIUtil.merge(boundSource.getROIs(), BooleanOperator.OR);
+            }
+            catch (UnsupportedOperationException e)
+            {
+                throw new VarException(evolution_bounds.getVariable(), "Cannot compute the evolution bounds: " + e.getMessage()
+                        + "\nIf you are not sure how to fix this, change this parameter to \"No Sequence\"");
+            }
         }
         else if (inputData.getSizeZ() == 1)
         {
@@ -1006,6 +1029,11 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 Thread.currentThread().interrupt();
                 return;
             }
+            catch (RejectedExecutionException e)
+            {
+                Thread.currentThread().interrupt();
+                return;
+            }
             
             if (coupling_flag.getValue())
             {
@@ -1212,6 +1240,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         
     }
     
+    @SuppressWarnings("unchecked")
     private void storeResult(int t)
     {
         boolean noResultsOnCurrentFrame = true;
@@ -1233,9 +1262,6 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             
             noResultsOnCurrentFrame = false;
             
-            // temporary fix: indicate correct surface area in the console
-            if (contour instanceof Mesh3D) System.out.println("Mesh #" + i + ": surface area = " + contour.getDimension(1));
-            
             // Update volume information
             if (!volumes.containsKey(segment))
             {
@@ -1246,9 +1272,39 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             ROI roi = contour.toROI(output_roiType.getValue(), inputData);
             if (roi != null)
             {
-                roi.setName("Object #" + StringUtil.toString(i, nbPaddingDigits + 1));
-                roi.setColor(contour.getColor());
-                rois.add(roi);
+                if (output_rois.getValue() == ExportROI.TEMPORAL_ROI)
+                {
+                    if (!temporalROIs.containsKey(segment))
+                    {
+                        // create the temporal ROI once
+                        if (roi instanceof ROI2D)
+                        {
+                            temporalROIs.put(segment, new TemporalROI2D((Class<ROI2D>) output_roiType.getValue().clazz));
+                        }
+                        else
+                        {
+                            temporalROIs.put(segment, new TemporalROI3D((Class<ROI3D>) output_roiType.getValue().clazz));
+                        }
+                        
+                        temporalROIs.get(segment).setName("Object #" + StringUtil.toString(i, nbPaddingDigits + 1));
+                        inputData.addROI(temporalROIs.get(segment));
+                    }
+                    
+                    if (roi instanceof ROI2D)
+                    {
+                        ((TemporalROI2D) temporalROIs.get(segment)).setTimePoint(t, (ROI2D) roi);
+                    }
+                    else
+                    {
+                        ((TemporalROI3D) temporalROIs.get(segment)).setTimePoint(t, (ROI3D) roi);
+                    }
+                }
+                else
+                {
+                    roi.setName("Object #" + StringUtil.toString(i, nbPaddingDigits + 1));
+                    roi.setColor(contour.getColor());
+                    rois.add(roi);
+                }
             }
             
             // output labels

@@ -128,10 +128,16 @@ public class Polygon2D extends ActiveContour
         
         points.ensureCapacity(n);
         contourNormals = new Vector3d[n];
+        modelForces = new Vector3d[n];
+        feedbackForces = new Vector3d[n];
+        volumeConstraintForces = new Vector3d[n];
         
         for (int i = 0; i < n; i++)
         {
             contourNormals[i] = new Vector3d();
+            modelForces[i] = new Vector3d();
+            feedbackForces[i] = new Vector3d();
+            volumeConstraintForces[i] = new Vector3d();
             addPoint(new Point3d(contour.points.get(i)));
         }
         
@@ -250,7 +256,7 @@ public class Polygon2D extends ActiveContour
         int i = 0, j = 0, n = points.size();
         Point3d p_i = null, p_j = null;
         
-        double divisionDistQ = boundingSphere.getRadius() * 0.1;
+        double divisionDistQ = boundingSphere.getRadius() * 0.3;
         divisionDistQ *= divisionDistQ;
         
         double minDistanceQ = minDistance;
