@@ -1,20 +1,17 @@
-package plugins.adufour.activecontours;
+package plugins.adufour.roi;
 
 import icy.canvas.IcyCanvas;
 import icy.canvas.IcyCanvas2D;
-import icy.canvas.IcyCanvas3D;
 import icy.painter.OverlayEvent;
 import icy.painter.OverlayListener;
 import icy.roi.ROI;
+import icy.roi.ROI2D;
 import icy.roi.ROI3D;
-import icy.roi.ROI4D;
 import icy.roi.ROIEvent;
 import icy.roi.ROIListener;
 import icy.sequence.Sequence;
-import icy.system.IcyExceptionHandler;
 import icy.type.point.Point5D;
-import icy.type.rectangle.Rectangle3D;
-import icy.type.rectangle.Rectangle4D;
+import icy.type.rectangle.Rectangle5D;
 import icy.util.XMLUtil;
 
 import java.awt.Color;
@@ -22,61 +19,30 @@ import java.awt.Graphics2D;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseWheelEvent;
+import java.lang.reflect.Method;
 import java.util.Iterator;
-import java.util.Map.Entry;
 import java.util.TreeMap;
 import java.util.concurrent.Semaphore;
 
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 
-/**
- * A temporal sequence of {@link ROI3D} objects.
- * 
- * @author Alexandre Dufour
- */
-class TemporalROI3D extends ROI4D implements ROIListener, OverlayListener, Iterable<ROI3D>
+public class TemporalROI<R extends ROI> extends ROI implements ROIListener, OverlayListener, Iterable<R>
 {
-    public static final String              PROPERTY_USECHILDCOLOR = "useChildColor";
+    public static final String          PROPERTY_USECHILDCOLOR = "useChildColor";
     
-    protected final TreeMap<Integer, ROI3D> roiSequence            = new TreeMap<Integer, ROI3D>();
+    protected final TreeMap<Integer, R> slices                 = new TreeMap<Integer, R>();
     
-    protected final Class<? extends ROI3D>  roiClass;
-    protected boolean                       useChildColor;
-    protected Semaphore                     modifyingSlice;
+    private int                         c;
     
-    /**
-     * Creates a new 3D ROI based on the given 2D ROI type.
-     */
-    public TemporalROI3D(Class<? extends ROI3D> roiClass)
+    protected boolean                   useChildColor;
+    protected Semaphore                 modifyingSlice;
+    
+    public TemporalROI()
     {
         super();
-        
-        this.roiClass = roiClass;
         useChildColor = false;
         modifyingSlice = new Semaphore(1);
-    }
-    
-    @Override
-    protected ROIPainter createPainter()
-    {
-        return new ROI3DSequencePainter();
-    }
-    
-    /**
-     * Create a new empty 2D ROI slice.
-     */
-    protected ROI3D createSlice()
-    {
-        try
-        {
-            return roiClass.newInstance();
-        }
-        catch (Exception e)
-        {
-            IcyExceptionHandler.showErrorMessage(e, true, true);
-            return null;
-        }
     }
     
     /**
@@ -112,7 +78,7 @@ class TemporalROI3D extends ROI4D implements ROIListener, OverlayListener, Itera
      */
     public void setColor(int t, Color value)
     {
-        final ROI3D slice = getSlice(t);
+        final R slice = getSlice(t);
         
         modifyingSlice.acquireUninterruptibly();
         try
@@ -138,7 +104,7 @@ class TemporalROI3D extends ROI4D implements ROIListener, OverlayListener, Itera
                 modifyingSlice.acquireUninterruptibly();
                 try
                 {
-                    for (ROI3D slice : roiSequence.values())
+                    for (R slice : slices.values())
                         slice.setColor(value);
                 }
                 finally
@@ -164,7 +130,7 @@ class TemporalROI3D extends ROI4D implements ROIListener, OverlayListener, Itera
             modifyingSlice.acquireUninterruptibly();
             try
             {
-                for (ROI3D slice : roiSequence.values())
+                for (R slice : slices.values())
                     slice.setOpacity(value);
             }
             finally
@@ -189,7 +155,7 @@ class TemporalROI3D extends ROI4D implements ROIListener, OverlayListener, Itera
             modifyingSlice.acquireUninterruptibly();
             try
             {
-                for (ROI3D slice : roiSequence.values())
+                for (R slice : slices.values())
                     slice.setStroke(value);
             }
             finally
@@ -214,7 +180,7 @@ class TemporalROI3D extends ROI4D implements ROIListener, OverlayListener, Itera
             modifyingSlice.acquireUninterruptibly();
             try
             {
-                for (ROI3D slice : roiSequence.values())
+                for (R slice : slices.values())
                     slice.setCreating(value);
             }
             finally
@@ -239,7 +205,7 @@ class TemporalROI3D extends ROI4D implements ROIListener, OverlayListener, Itera
             modifyingSlice.acquireUninterruptibly();
             try
             {
-                for (ROI3D slice : roiSequence.values())
+                for (R slice : slices.values())
                     slice.setReadOnly(value);
             }
             finally
@@ -264,7 +230,7 @@ class TemporalROI3D extends ROI4D implements ROIListener, OverlayListener, Itera
             modifyingSlice.acquireUninterruptibly();
             try
             {
-                for (ROI3D slice : roiSequence.values())
+                for (R slice : slices.values())
                     slice.setFocused(value);
             }
             finally
@@ -289,7 +255,7 @@ class TemporalROI3D extends ROI4D implements ROIListener, OverlayListener, Itera
             modifyingSlice.acquireUninterruptibly();
             try
             {
-                for (ROI3D slice : roiSequence.values())
+                for (R slice : slices.values())
                     slice.setSelected(value);
             }
             finally
@@ -303,19 +269,24 @@ class TemporalROI3D extends ROI4D implements ROIListener, OverlayListener, Itera
         }
     }
     
-    @Override
+    public int getC()
+    {
+        return c;
+    }
+    
     public void setC(int value)
     {
         beginUpdate();
         try
         {
-            super.setC(value);
+            this.c = value;
             
             modifyingSlice.acquireUninterruptibly();
+            
             try
             {
-                for (ROI3D slice : roiSequence.values())
-                    slice.setC(value);
+                for (R slice : slices.values())
+                    setC(slice, value);
             }
             finally
             {
@@ -333,7 +304,17 @@ class TemporalROI3D extends ROI4D implements ROIListener, OverlayListener, Itera
      */
     public boolean isEmpty()
     {
-        return roiSequence.isEmpty();
+        return slices.isEmpty();
+    }
+    
+    public int getFirstT()
+    {
+        return slices.firstKey();
+    }
+    
+    public int getLastT()
+    {
+        return slices.lastKey();
     }
     
     /**
@@ -344,60 +325,118 @@ class TemporalROI3D extends ROI4D implements ROIListener, OverlayListener, Itera
      */
     public int getSizeT()
     {
-        if (roiSequence.isEmpty()) return 0;
+        if (slices.isEmpty()) return 0;
         
-        return (roiSequence.lastKey().intValue() - roiSequence.firstKey().intValue()) + 1;
+        return (slices.lastKey().intValue() - slices.firstKey().intValue()) + 1;
     }
     
     /**
      * Returns the ROI slice at given T position.
      */
-    public ROI3D getSlice(int t)
+    public R getSlice(int t)
     {
-        return roiSequence.get(Integer.valueOf(t));
+        return slices.get(Integer.valueOf(t));
     }
     
     /**
-     * Returns the ROI slice at given T position.
+     * Removes all slices.
      */
-    public ROI3D getSlice(int t, boolean createIfNull)
+    public void clear()
     {
-        ROI3D result = getSlice(t);
-        
-        if ((result == null) && createIfNull)
+        for (R slice : slices.values())
         {
-            result = createSlice();
-            if (result != null) setTimePoint(t, result);
+            slice.removeListener(this);
+            slice.getOverlay().removeOverlayListener(this);
         }
         
-        return result;
+        slices.clear();
     }
     
     /**
      * Sets the slice for the given Z position.
      */
-    public void setTimePoint(int t, ROI3D roi)
+    public void setSlice(int t, R slice)
     {
-        // set Z, T and C position
-        roi.setT(t);
-        roi.setC(getC());
-        // listen events from this ROI and its overlay
-        roi.addListener(this);
-        roi.getOverlay().addOverlayListener(this);
+        setT(slice, t);
+        setC(slice, getC());
         
-        roiSequence.put(Integer.valueOf(t), roi);
+        // listen events from this ROI and its overlay
+        slice.addListener(this);
+        slice.getOverlay().addOverlayListener(this);
+        
+        slices.put(Integer.valueOf(t), slice);
         
         // notify ROI changed
         roiChanged();
     }
     
     /**
+     * calls {@link ROI2D#setC(int)} or {@link ROI3D#setC(int)} via reflection (because {@link ROI}
+     * has not such method)
+     * 
+     * @param roi
+     * @return
+     */
+    private void setC(R roi, int c)
+    {
+        try
+        {
+            Method setC = roi.getClass().getMethod("setC", Integer.TYPE);
+            setC.invoke(roi, c);
+        }
+        catch (Exception e)
+        {
+            throw new UnsupportedOperationException("Cannot assign channel to " + roi, e);
+        }
+    }
+    
+    /**
+     * calls {@link ROI2D#setT(int)} or {@link ROI3D#setT(int)} via reflection (because {@link ROI}
+     * has not such method)
+     * 
+     * @param roi
+     * @return
+     */
+    private void setT(R roi, int t)
+    {
+        try
+        {
+            Method setT = roi.getClass().getMethod("setT", Integer.TYPE);
+            setT.invoke(roi, t);
+        }
+        catch (Exception e)
+        {
+            throw new UnsupportedOperationException("Cannot assign time point to " + roi, e);
+        }
+    }
+    
+    /**
+     * calls {@link ROI2D#getT()} or {@link ROI3D#getT()} via reflection (because {@link ROI} has
+     * not such method)
+     * 
+     * @param roi
+     * @return
+     */
+    private int getT(R roi)
+    {
+        try
+        {
+            Method getT = roi.getClass().getMethod("getT");
+            return (Integer) getT.invoke(roi);
+        }
+        catch (Exception e)
+        {
+            throw new UnsupportedOperationException("Cannot get time point from " + roi, e);
+        }
+    }
+    
+    /**
      * Removes slice at the given Z position and returns it.
      */
-    public ROI3D removeSlice(int z)
+    public R removeSlice(int t)
     {
         // remove the current slice (if any)
-        final ROI3D result = roiSequence.remove(Integer.valueOf(z));
+        final R result = slices.remove(t);
         
         // remove listeners
         if (result != null)
@@ -412,18 +451,110 @@ class TemporalROI3D extends ROI4D implements ROIListener, OverlayListener, Itera
         return result;
     }
     
-    /**
-     * Removes all slices.
-     */
-    public void clear()
+    @Override
+    public Iterator<R> iterator()
     {
-        for (ROI3D slice : roiSequence.values())
+        return slices.values().iterator();
+    }
+    
+    @Override
+    public boolean loadFromXML(Node node)
+    {
+        beginUpdate();
+        try
         {
-            slice.removeListener(this);
-            slice.getOverlay().removeOverlayListener(this);
+            if (!super.loadFromXML(node)) return false;
+            
+            // we don't need to save the 2D ROI class as the parent class already do it
+            clear();
+            
+            for (Element e : XMLUtil.getElements(node, "slice"))
+            {
+                String roiClassName = XMLUtil.getAttributeValue(e, "className", null);
+                
+                // faster than using complete XML serialization
+                @SuppressWarnings("unchecked")
+                final R slice = (R) Class.forName(roiClassName).newInstance();
+                
+                // error while reloading the ROI from XML
+                if (slice == null || !slice.loadFromXML(e)) return false;
+                
+                setSlice(getT(slice), slice);
+            }
+        }
+        catch (Exception e1)
+        {
+            throw new RuntimeException("Couldn't load temporal ROI from XML", e1);
+        }
+        finally
+        {
+            endUpdate();
         }
         
-        roiSequence.clear();
+        return true;
+    }
+    
+    @Override
+    public boolean saveToXML(Node node)
+    {
+        if (!super.saveToXML(node)) return false;
+        
+        for (R slice : slices.values())
+        {
+            Element sliceNode = XMLUtil.addElement(node, "slice");
+            XMLUtil.setAttributeValue(sliceNode, "className", slice.getClassName());
+            
+            if (!slice.saveToXML(sliceNode)) return false;
+        }
+        
+        return true;
+    }
+    
+    @Override
+    public double computeNumberOfPoints()
+    {
+        double interior = 0;
+        
+        for (R slice : slices.values())
+            interior += slice.getNumberOfPoints();
+        
+        return interior;
+    }
+    
+    @Override
+    public double computeNumberOfContourPoints()
+    {
+        double contour = 0;
+        
+        for (R slice : slices.values())
+            contour += slice.getNumberOfContourPoints();
+        
+        return contour;
+    }
+    
+    @Override
+    public boolean hasSelectedPoint()
+    {
+        // default
+        return false;
+    }
+    
+    // LISTENERS //
+    
+    // called when one of the slice ROI changed
+    @Override
+    public void roiChanged(ROIEvent event)
+    {
+        // propagate children change event
+        sliceChanged(event);
+    }
+    
+    // called when one of the slice ROI overlay changed
+    @Override
+    public void overlayChanged(OverlayEvent event)
+    {
+        // propagate children overlay change event
+        sliceOverlayChanged(event);
     }
     
     /**
@@ -480,237 +611,30 @@ class TemporalROI3D extends ROI4D implements ROIListener, OverlayListener, Itera
     }
     
     @Override
-    public Rectangle4D computeBounds4D()
+    protected ROIPainter createPainter()
     {
-        Rectangle3D r3 = null;
-        
-        for (ROI3D roi : roiSequence.values())
+        return new TemporalROIPainter();
+    }
+    
+    protected class TemporalROIPainter extends ROIPainter
+    {
+        @Override
+        public void paint(Graphics2D g, Sequence sequence, IcyCanvas canvas)
         {
-            final Rectangle3D bnd3d = roi.getBounds3D();
-            
-            // only add non empty bounds
-            if (!bnd3d.isEmpty())
+            if (canvas instanceof IcyCanvas2D && isActiveFor(canvas))
             {
-                if (r3 == null) r3 = (Rectangle3D) bnd3d.clone();
-                else r3.add(bnd3d);
+                // forward event to current slice
+                final R slice = getCurrentSlice(canvas);
+                
+                if (slice != null && getT(slice) == canvas.getPositionT()) slice.getOverlay().paint(g, sequence, canvas);
             }
         }
         
-        // create empty 2D bounds
-        if (r3 == null) r3 = new Rectangle3D.Double();
-        
-        final int minT;
-        final int sizeT;
-        
-        if (!roiSequence.isEmpty())
-        {
-            minT = roiSequence.firstKey().intValue();
-            sizeT = getSizeT();
-        }
-        else
-        {
-            minT = 0;
-            sizeT = 0;
-        }
-        
-        return new Rectangle4D.Double(r3.getX(), r3.getY(), r3.getZ(), minT, r3.getSizeX(), r3.getSizeY(), r3.getSizeZ(), sizeT);
-    }
-    
-    @Override
-    public boolean contains(double x, double y, double z, double t)
-    {
-        final ROI3D roi = getSlice((int) t);
-        
-        if (roi != null) return roi.contains(x, y, z);
-        
-        return false;
-    }
-    
-    @Override
-    public boolean contains(double x, double y, double z, double t, double sizeX, double sizeY, double sizeZ, double sizeT)
-    {
-        final Rectangle4D bounds = getBounds4D();
-        
-        // easy discard
-        if (!bounds.contains(x, y, z, t, sizeX, sizeY, sizeZ, sizeT)) return false;
-        
-        for (int localT = (int) t; localT < (int) (t + sizeZ); localT++)
-        {
-            final ROI3D roi = getSlice(localT);
-            if (roi == null || !roi.contains(x, y, z, sizeX, sizeY, sizeZ)) return false;
-        }
-        
-        return true;
-    }
-    
-    @Override
-    public boolean intersects(double x, double y, double z, double t, double sizeX, double sizeY, double sizeZ, double sizeT)
-    {
-        final Rectangle4D bounds = getBounds4D();
-        
-        // easy discard
-        if (!bounds.intersects(x, y, z, t, sizeX, sizeY, sizeZ, sizeT)) return false;
-        
-        for (int localT = (int) t; localT < (int) (t + sizeT); localT++)
-        {
-            final ROI3D roi = getSlice(localT);
-            if (roi != null && roi.intersects(x, y, z, sizeX, sizeY, sizeZ)) return true;
-        }
-        
-        return false;
-    }
-    
-    @Override
-    public boolean hasSelectedPoint()
-    {
-        // default
-        return false;
-    }
-    
-    @Override
-    public double computeNumberOfContourPoints()
-    {
-        // 3D edge points = first slice points + inter slices edge points + last slice points
-        // TODO: only approximation, fix this to use real 3D edge point
-        double perimeter = 0;
-        
-        if (roiSequence.size() <= 2)
-        {
-            for (ROI3D slice : roiSequence.values())
-                perimeter += slice.getNumberOfPoints();
-        }
-        else
-        {
-            final Entry<Integer, ROI3D> firstEntry = roiSequence.firstEntry();
-            final Entry<Integer, ROI3D> lastEntry = roiSequence.lastEntry();
-            final Integer firstKey = firstEntry.getKey();
-            final Integer lastKey = lastEntry.getKey();
-            
-            perimeter = firstEntry.getValue().getNumberOfPoints();
-            
-            for (ROI3D slice : roiSequence.subMap(firstKey, false, lastKey, false).values())
-                perimeter += slice.getNumberOfContourPoints();
-            
-            perimeter += lastEntry.getValue().getNumberOfPoints();
-        }
-        
-        return perimeter;
-    }
-    
-    @Override
-    public double computeNumberOfPoints()
-    {
-        double volume = 0;
-        
-        for (ROI3D slice : roiSequence.values())
-            volume += slice.getNumberOfPoints();
-        
-        return volume;
-    }
-    
-    @Override
-    public boolean canTranslate()
-    {
-        // only need to test the first entry
-        if (!roiSequence.isEmpty()) return roiSequence.firstEntry().getValue().canTranslate();
-        
-        return false;
-    }
-    
-    // called when one of the slice ROI changed
-    @Override
-    public void roiChanged(ROIEvent event)
-    {
-        // propagate children change event
-        sliceChanged(event);
-    }
-    
-    // called when one of the slice ROI overlay changed
-    @Override
-    public void overlayChanged(OverlayEvent event)
-    {
-        // propagate children overlay change event
-        sliceOverlayChanged(event);
-    }
-    
-    @Override
-    public Iterator<ROI3D> iterator()
-    {
-        return roiSequence.values().iterator();
-    }
-    
-    @Override
-    public boolean loadFromXML(Node node)
-    {
-        beginUpdate();
-        try
-        {
-            if (!super.loadFromXML(node)) return false;
-            
-            // we don't need to save the 2D ROI class as the parent class already do it
-            clear();
-            
-            for (Element e : XMLUtil.getElements(node, "slice"))
-            {
-                // faster than using complete XML serialization
-                final ROI3D slice = createSlice();
-                
-                // error while reloading the ROI from XML
-                if ((slice == null) || !slice.loadFromXML(e)) return false;
-                
-                setTimePoint(slice.getT(), slice);
-            }
-        }
-        finally
-        {
-            endUpdate();
-        }
-        
-        return true;
-    }
-    
-    @Override
-    public boolean saveToXML(Node node)
-    {
-        if (!super.saveToXML(node)) return false;
-        
-        for (ROI3D slice : roiSequence.values())
-        {
-            Element sliceNode = XMLUtil.addElement(node, "slice");
-            
-            if (!slice.saveToXML(sliceNode)) return false;
-        }
-        
-        return true;
-    }
-    
-    public class ROI3DSequencePainter extends ROIPainter
-    {
-        ROI3D getSliceForCanvas(IcyCanvas canvas)
+        protected R getCurrentSlice(IcyCanvas canvas)
         {
             final int t = canvas.getPositionT();
             
             return t >= 0 ? getSlice(t) : null;
-        }
-        
-        @Override
-        public void paint(Graphics2D g, Sequence sequence, IcyCanvas canvas)
-        {
-            if (isActiveFor(canvas))
-            {
-                if (canvas instanceof IcyCanvas3D)
-                {
-                    // TODO
-                    
-                }
-                else if (canvas instanceof IcyCanvas2D)
-                {
-                    // forward event to current slice
-                    final ROI3D slice = getSliceForCanvas(canvas);
-                    
-                    if (slice != null && slice.getT() == canvas.getPositionT()) slice.getOverlay().paint(g, sequence, canvas);
-                }
-            }
         }
         
         @Override
@@ -723,7 +647,7 @@ class TemporalROI3D extends ROI4D implements ROIListener, OverlayListener, Itera
             if (isActiveFor(canvas))
             {
                 // forward event to current slice
-                final ROI3D slice = getSliceForCanvas(canvas);
+                final R slice = getCurrentSlice(canvas);
                 
                 if (slice != null) slice.getOverlay().keyPressed(e, imagePoint, canvas);
             }
@@ -739,7 +663,7 @@ class TemporalROI3D extends ROI4D implements ROIListener, OverlayListener, Itera
             if (isActiveFor(canvas))
             {
                 // forward event to current slice
-                final ROI3D slice = getSliceForCanvas(canvas);
+                final R slice = getCurrentSlice(canvas);
                 
                 if (slice != null) slice.getOverlay().keyReleased(e, imagePoint, canvas);
             }
@@ -755,7 +679,7 @@ class TemporalROI3D extends ROI4D implements ROIListener, OverlayListener, Itera
             if (isActiveFor(canvas))
             {
                 // forward event to current slice
-                final ROI3D slice = getSliceForCanvas(canvas);
+                final R slice = getCurrentSlice(canvas);
                 
                 if (slice != null) slice.getOverlay().mouseEntered(e, imagePoint, canvas);
             }
@@ -771,7 +695,7 @@ class TemporalROI3D extends ROI4D implements ROIListener, OverlayListener, Itera
             if (isActiveFor(canvas))
             {
                 // forward event to current slice
-                final ROI3D slice = getSliceForCanvas(canvas);
+                final R slice = getCurrentSlice(canvas);
                 
                 if (slice != null) slice.getOverlay().mouseExited(e, imagePoint, canvas);
             }
@@ -787,7 +711,7 @@ class TemporalROI3D extends ROI4D implements ROIListener, OverlayListener, Itera
             if (isActiveFor(canvas))
             {
                 // forward event to current slice
-                final ROI3D slice = getSliceForCanvas(canvas);
+                final R slice = getCurrentSlice(canvas);
                 
                 if (slice != null) slice.getOverlay().mouseMove(e, imagePoint, canvas);
             }
@@ -803,7 +727,7 @@ class TemporalROI3D extends ROI4D implements ROIListener, OverlayListener, Itera
             if (isActiveFor(canvas))
             {
                 // forward event to current slice
-                final ROI3D slice = getSliceForCanvas(canvas);
+                final R slice = getCurrentSlice(canvas);
                 
                 if (slice != null) slice.getOverlay().mouseDrag(e, imagePoint, canvas);
             }
@@ -819,7 +743,7 @@ class TemporalROI3D extends ROI4D implements ROIListener, OverlayListener, Itera
             if (isActiveFor(canvas))
             {
                 // forward event to current slice
-                final ROI3D slice = getSliceForCanvas(canvas);
+                final R slice = getCurrentSlice(canvas);
                 
                 if (slice != null) slice.getOverlay().mousePressed(e, imagePoint, canvas);
             }
@@ -835,7 +759,7 @@ class TemporalROI3D extends ROI4D implements ROIListener, OverlayListener, Itera
             if (isActiveFor(canvas))
             {
                 // forward event to current slice
-                final ROI3D slice = getSliceForCanvas(canvas);
+                final R slice = getCurrentSlice(canvas);
                 
                 if (slice != null) slice.getOverlay().mouseReleased(e, imagePoint, canvas);
             }
@@ -851,7 +775,7 @@ class TemporalROI3D extends ROI4D implements ROIListener, OverlayListener, Itera
             if (isActiveFor(canvas))
             {
                 // forward event to current slice
-                final ROI3D slice = getSliceForCanvas(canvas);
+                final R slice = getCurrentSlice(canvas);
                 
                 if (slice != null) slice.getOverlay().mouseClick(e, imagePoint, canvas);
             }
@@ -867,11 +791,96 @@ class TemporalROI3D extends ROI4D implements ROIListener, OverlayListener, Itera
             if (isActiveFor(canvas))
             {
                 // forward event to current slice
-                final ROI3D slice = getSliceForCanvas(canvas);
+                final R slice = getCurrentSlice(canvas);
                 
                 if (slice != null) slice.getOverlay().mouseWheelMoved(e, imagePoint, canvas);
             }
         }
     }
     
+    @Override
+    public int getDimension()
+    {
+        // TODO Auto-generated method stub
+        return 0;
+    }
+    
+    @Override
+    public boolean isActiveFor(IcyCanvas canvas)
+    {
+        int currentT = canvas.getPositionT();
+        return currentT == -1 || (slices.containsKey(currentT));
+    }
+    
+    @Override
+    public Rectangle5D computeBounds5D()
+    {
+        Rectangle5D bounds = null;
+        
+        for(R roi : slices.values())
+        {
+            if (bounds == null)
+            {
+                bounds = roi.getBounds5D();                
+            }
+            else
+            {
+                bounds = bounds.createUnion(roi.getBounds5D());
+            }
+        }
+        
+        return bounds;
+    }
+    
+    @Override
+    public boolean canSetBounds()
+    {
+        return false;
+    }
+    
+    @Override
+    public boolean canSetPosition()
+    {
+        return false;
+    }
+    
+    @Override
+    public void setBounds5D(Rectangle5D bounds)
+    {
+        System.out.println("setting bounds 5D");
+    }
+    
+    @Override
+    public void setPosition5D(Point5D position)
+    {
+        System.out.println("setting position 5D");
+    }
+    
+    @Override
+    public boolean contains(double x, double y, double z, double t, double c)
+    {
+        return slices.containsKey(t) && slices.get(t).contains(x, y, z, t, c);
+    }
+    
+    @Override
+    public boolean contains(double x, double y, double z, double t, double c, double sizeX, double sizeY, double sizeZ, double sizeT, double sizeC)
+    {
+        if (t < getFirstT() || t + sizeT > getLastT()) return false;
+        
+        for (R slice : slices.values())
+            if (!slice.contains(x, y, z, t, c, sizeX, sizeY, sizeZ, sizeT, sizeC)) return false;
+        
+        return true;
+    }
+    
+    @Override
+    public boolean intersects(double x, double y, double z, double t, double c, double sizeX, double sizeY, double sizeZ, double sizeT, double sizeC)
+    {
+        if (t > getLastT() || t + sizeT < getFirstT()) return false;
+        
+        for (R slice : slices.values())
+            if (!slice.intersects(x, y, z, t, c, sizeX, sizeY, sizeZ, sizeT, sizeC)) return false;
+        
+        return true;
+    }
 }

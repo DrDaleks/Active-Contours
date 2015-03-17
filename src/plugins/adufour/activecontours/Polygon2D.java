@@ -256,7 +256,9 @@ public class Polygon2D extends ActiveContour
         int i = 0, j = 0, n = points.size();
         Point3d p_i = null, p_j = null;
         
-        double divisionDistQ = boundingSphere.getRadius() * 0.3;
+        double divSensitivity = (divisionSensitivity == null ? 0 : divisionSensitivity.getValue());
+        
+        double divisionDistQ = boundingSphere.getRadius() * 2 * divSensitivity;
         divisionDistQ *= divisionDistQ;
         
         double minDistanceQ = minDistance;
@@ -273,7 +275,6 @@ public class Polygon2D extends ActiveContour
             for (j = i + 2; j < n - 1; j++)
             {
                 p_j = points.get(j);
-                Vector3d n_j = contourNormals[j];
                 
                 double distQ = p_i.distanceSquared(p_j);
                 
@@ -307,18 +308,27 @@ public class Polygon2D extends ActiveContour
                 }
                 else
                 {
-                    // self-intersection always involved opposite normals
-                    if (n_i.dot(n_j) > -0.8) continue;
+                    // self-intersection always involves opposite normals
+                    if (n_i.dot(contourNormals[j]) > -0.5) continue;
                     
                     // look for division
+                    
+                    // what about the intensity profile between v1 and v2?
+//                    ROI2DLine line = new ROI2DLine(points.get(i).x, points.get(i).y, points.get(j).x, points.get(j).y);
+//                    int[] linePoints = line.getBooleanMask(true).getPointsAsIntArray();
+                    
                     
                     // are points sufficiently close?
                     // => use the bounding radius / 2
                     if (distQ < divisionDistQ)
                     {
                         // are points located "in front" of each other?
+                        // j - i ~= n/2 ?
+                        // take a loose guess (+/- n/7)
                         if ((j - i) > (2 * n / 5) && (j - i) < (3 * n / 5))
                         {
+                            // check the local curvature on each side (4 points away)
+                            
                             Vector3d vi1 = new Vector3d(points.get((i + n - 4) % n));
                             Vector3d vi2 = new Vector3d(points.get((i + 4) % n));
                             vi1.sub(p_i);
@@ -326,6 +336,9 @@ public class Polygon2D extends ActiveContour
                             vi1.normalize();
                             vi2.normalize();
                             vi1.cross(vi1, vi2);
+                            // discard small of positive curvatures (i.e. z < 0)
+                            if (vi1.z < 0.05) continue;
+                            
                             double vi_lQ = vi1.lengthSquared();
                             // System.out.println(vi1.lengthSquared());
                             Vector3d vj1 = new Vector3d(points.get((j + n - 4) % n));
@@ -335,6 +348,10 @@ public class Polygon2D extends ActiveContour
                             vj1.normalize();
                             vj2.normalize();
                             vj1.cross(vj1, vj2);
+                            
+                            // discard small of positive curvatures (i.e. z < 0)
+                            if (vj1.z < 0.05) continue;
+                            
                             double vj_lQ = vj1.lengthSquared();
                             // System.out.println(vj1.lengthSquared());
                             
@@ -709,7 +726,7 @@ public class Polygon2D extends ActiveContour
         if (avgFeedback.length() > 0)
         {
             avgFeedback.scale(1.0 / cpt);
-            avgFeedback.scale(Math.abs(volumeDiff / targetVolume) / 1.5);
+            avgFeedback.scale(Math.abs(volumeDiff / targetVolume) / 0.5);
             
             // move the entire mesh (ugly, but amazingly efficient!!)
             for (int i = 0; i < n; i++)

@@ -24,15 +24,17 @@ import plugins.nchenouard.spot.Detection;
  */
 public abstract class ActiveContour extends Detection implements Iterable<Point3d>
 {
-    protected final Processor      processor      = new Processor(SystemUtil.getNumberOfCPUs() * 2);
+    protected final Processor      processor                  = new Processor(SystemUtil.getNumberOfCPUs() * 2);
     
     protected SlidingWindow        convergence;
     
-    protected VarDouble            sampling       = new VarDouble("sampling", 1.0);
+    protected VarDouble            sampling                   = new VarDouble("sampling", 1.0);
     
-    protected final BoundingSphere boundingSphere = new BoundingSphere();
+    protected final BoundingSphere boundingSphere             = new BoundingSphere();
     
-    protected final BoundingBox    boundingBox    = new BoundingBox();
+    protected final BoundingBox    boundingBox                = new BoundingBox();
+    
+    protected Var<Double>          divisionSensitivity;
     
     /**
      * Constructor for XML loading purposes only
@@ -298,4 +300,9 @@ public abstract class ActiveContour extends Detection implements Iterable<Point3
      * @return <code>true</code> if the contour has converged
      */
     public abstract boolean hasConverged(SlidingWindow.Operation operation, double epsilon);
+    
+    public void setDivisionSensitivity(Var<Double> divisionSensitivity)
+    {
+        this.divisionSensitivity = divisionSensitivity;
+    }
 }
