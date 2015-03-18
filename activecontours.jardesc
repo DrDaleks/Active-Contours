@@ -11,6 +11,7 @@
         </sealing>
     </manifest>
     <selectedElements exportClassFiles="true" exportJavaFiles="true" exportOutputFolder="false">
+        <javaElement handleIdentifier="=Active-Contours/src&lt;plugins.adufour.roi"/>
         <javaElement handleIdentifier="=Active-Contours/src&lt;plugins.adufour.activecontours{ActiveContour.java"/>
         <javaElement handleIdentifier="=Active-Contours/src&lt;plugins.adufour.activecontours{ActiveContours.java"/>
         <javaElement handleIdentifier="=Active-Contours/src&lt;plugins.adufour.activecontours{DeformationProfiler.java"/>

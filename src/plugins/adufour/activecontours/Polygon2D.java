@@ -168,6 +168,9 @@ public class Polygon2D extends ActiveContour
             try
             {
                 triangulate((ROI2DArea) roi, sampling.getValue());
+                reSample(0.8, 1.4);
+                updateMetaData();
+                return;
             }
             catch (TopologyException e)
             {
@@ -177,22 +180,11 @@ public class Polygon2D extends ActiveContour
                 roi.setZ(z);
                 roi.setT(t);
             }
-            
         }
         
-        if (points.size() <= 4)
+        if (roi instanceof ROI2DShape)
         {
-            // replace by ellipse
-            int z = roi.getZ();
-            int t = roi.getT();
-            roi = new ROI2DEllipse(roi.getBounds2D());
-            roi.setZ(z);
-            roi.setT(t);
-            
-            points.clear();
-            
             // convert the ROI into a linked list of points
-            
             double[] segment = new double[6];
             
             PathIterator pathIterator = ((ROI2DShape) roi).getPathIterator(null, 0.1);
@@ -200,6 +192,7 @@ public class Polygon2D extends ActiveContour
             // first segment is necessarily a "move to" operation
             
             pathIterator.currentSegment(segment);
+            
             addPoint(new Point3d(segment[0], segment[1], z));
             
             while (!pathIterator.isDone())
@@ -212,28 +205,34 @@ public class Polygon2D extends ActiveContour
                 
                 // the final one should be a "close" operation, do nothing
             }
-            
-            final int nbPoints = points.size();
-            if (modelForces == null || modelForces.length != nbPoints)
-            {
-                modelForces = new Vector3d[nbPoints];
-                contourNormals = new Vector3d[nbPoints];
-                feedbackForces = new Vector3d[nbPoints];
-                volumeConstraintForces = new Vector3d[nbPoints];
-                
-                for (int i = 0; i < nbPoints; i++)
-                {
-                    modelForces[i] = new Vector3d();
-                    contourNormals[i] = new Vector3d();
-                    feedbackForces[i] = new Vector3d();
-                    volumeConstraintForces[i] = new Vector3d();
-                }
-            }
-            
-            counterClockWise = (getAlgebraicInterior() > 0);
         }
         
-        updateMetaData();
+        // if (points.size() <= 4)
+        // {
+        // // replace by ellipse
+        // int z = roi.getZ();
+        // int t = roi.getT();
+        // roi = new ROI2DEllipse(roi.getBounds2D());
+        // roi.setZ(z);
+        // roi.setT(t);
+        //
+        // points.clear();
+        // }
+        
+        counterClockWise = (getAlgebraicInterior() > 0);
+        
+        try
+        {
+            reSample(0.8, 1.4);
+        }
+        catch (TopologyException e)
+        {
+            Rectangle2D bounds = roi.getBounds2D();
+            
+            double xC = bounds.getCenterX();
+            double yC = bounds.getCenterY();
+            throw new RuntimeException("Couldn't create a contour from ROI: " + roi.getName() + " (located at " + xC + " ; " + yC + ")");
+        }
     }
     
     protected void addPoint(Point3d p)
@@ -314,9 +313,9 @@ public class Polygon2D extends ActiveContour
                     // look for division
                     
                     // what about the intensity profile between v1 and v2?
-//                    ROI2DLine line = new ROI2DLine(points.get(i).x, points.get(i).y, points.get(j).x, points.get(j).y);
-//                    int[] linePoints = line.getBooleanMask(true).getPointsAsIntArray();
-                    
+                    // ROI2DLine line = new ROI2DLine(points.get(i).x, points.get(i).y,
+                    // points.get(j).x, points.get(j).y);
+                    // int[] linePoints = line.getBooleanMask(true).getPointsAsIntArray();
                     
                     // are points sufficiently close?
                     // => use the bounding radius / 2
@@ -1163,7 +1162,7 @@ public class Polygon2D extends ActiveContour
     @Override
     public void reSample(double minFactor, double maxFactor) throws TopologyException
     {
-        if (getDimension(0) < 15) throw new TopologyException(this, new Polygon2D[] {});
+        if (getDimension(1) < 10) throw new TopologyException(this, new Polygon2D[] {});
         
         double minLength = sampling.getValue() * minFactor;
         double maxLength = sampling.getValue() * maxFactor;
@@ -1428,8 +1427,6 @@ public class Polygon2D extends ActiveContour
                 points.remove(i);
             current_resolution_doubled *= 2;
         }
-        
-        reSample(0.8, 1.4);
     }
     
     protected void updateNormals()
