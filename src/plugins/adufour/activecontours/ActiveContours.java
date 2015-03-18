@@ -388,10 +388,11 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             
             if (Thread.currentThread().isInterrupted())
             {
+                // store results if we are in GUI mode
+                if (!isHeadLess()) storeResult(t);
+                
                 break;
             }
-            
-            if (isHeadLess()) System.out.println("=> Storing result...");
             
             // store detections and results
             storeResult(t);
@@ -1269,6 +1270,8 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     @SuppressWarnings("unchecked")
     private void storeResult(int t)
     {
+        if (isHeadLess()) System.out.println("=> Storing result...");
+        
         boolean noResultsOnCurrentFrame = true;
         
         ArrayList<TrackSegment> segments = trackGroup.getValue().getTrackSegmentList();
