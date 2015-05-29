@@ -7,6 +7,7 @@ import icy.roi.ROI;
 import icy.roi.ROI3D;
 import icy.sequence.Sequence;
 import icy.type.DataType;
+import icy.type.rectangle.Rectangle3D;
 
 import java.awt.Graphics2D;
 import java.util.HashMap;
@@ -113,6 +114,8 @@ public class Mesh3D extends ActiveContour
         mesh = (ActiveMesh) contour.mesh.clone();
         setColor(contour.getColor());
         mesh.setColor(getColor());
+        
+        updateMetaData();
     }
     
     public Mesh3D(Var<Double> sampling, Tuple3d pixelSize, ROI3D roi, SlidingWindow convergenceWindow)
@@ -121,6 +124,8 @@ public class Mesh3D extends ActiveContour
         
         mesh = new ActiveMesh(sampling.getValue(), roi, pixelSize);
         mesh.setColor(getColor());
+        
+        updateMetaData();
     }
     
     /**
@@ -216,6 +221,8 @@ public class Mesh3D extends ActiveContour
         
         Vector3d regionForce = new Vector3d();
         
+        weight *= sampling.getValue();
+        
         double pixelSizeX = imageData.getPixelSizeX();
         double pixelSizeY = imageData.getPixelSizeY();
         double pixelSizeZ = imageData.getPixelSizeZ();
@@ -238,7 +245,7 @@ public class Mesh3D extends ActiveContour
             outDiff = val - cout;
             outDiff *= outDiff;
             
-            regionForce.scale(weight * sampling.getValue() * (sensitivity * outDiff) - (inDiff / sensitivity));
+            regionForce.scale(weight * (sensitivity * outDiff) - (inDiff / sensitivity));
             
             ((ActiveVertex) v).imageForces.add(regionForce);
         }
@@ -414,7 +421,8 @@ public class Mesh3D extends ActiveContour
     }
     
     /**
-     * Calculates the 3D image value at the given real coordinates by tri-linear interpolation
+     * Calculates the 3D image value at the given coordinates (in voxel units) by tri-linear
+     * interpolation
      * 
      * @param imageFloat
      *            the image to sample (must be of type {@link DataType#FLOAT})
@@ -688,12 +696,64 @@ public class Mesh3D extends ActiveContour
     }
     
     @Override
-    public double computeAverageIntensity(Sequence imageData, int channel, BooleanMask3D mask) throws TopologyException
+    public double computeAverageIntensity(Sequence regionData, BooleanMask3D mask) throws TopologyException
     {
         VarDouble avg = new VarDouble("avg", 0.0);
-        mesh.rasterScan(imageData, avg, mask);
+        mesh.rasterScan(regionData, avg, mask);
         return avg.getValue();
     }
+    
+    public double computeBackgroundIntensity(Sequence imageData, BooleanMask3D mask)
+    {
+        Rectangle3D.Integer b3 = mask.bounds;
+        
+        // attempt to calculate a localised average outside each contour
+        Point3d min = new Point3d(), max = new Point3d();
+        
+        boundingBox.getLower(min);
+        boundingBox.getUpper(max);
+        
+        min.x /= imageData.getPixelSizeX();
+        min.y /= imageData.getPixelSizeY();
+        min.z /= imageData.getPixelSizeZ();
+        
+        max.x /= imageData.getPixelSizeX();
+        max.y /= imageData.getPixelSizeY();
+        max.z /= imageData.getPixelSizeZ();
+        
+        double zExtent = max.z - min.z;
+        int minZ = Math.max(0, (int) Math.round(min.z - zExtent / 2));
+        int maxZ = Math.min(b3.sizeZ, (int) Math.round(max.z + zExtent / 2));
+        
+        double yExtent = max.y - min.y;
+        int minY = Math.max(0, (int) Math.round(min.y - yExtent / 2));
+        int maxY = Math.min(b3.sizeY, (int) Math.round(max.y + yExtent / 2));
+        
+        double xExtent = max.x - min.x;
+        int minX = Math.max(0, (int) Math.round(min.x - xExtent / 2));
+        int maxX = Math.min(b3.sizeX, (int) Math.round(max.x + xExtent / 2));
+        
+        double outSum = 0, outCpt = 0;
+        for (int z = minZ; z < maxZ; z++)
+        {
+            boolean[] _mask = mask.mask.get(z).mask;
+            float[] _data = imageData.getDataXYAsFloat(0, z, 0);
+            
+            for (int j = minY; j < maxY; j++)
+            {
+                int offset = minX + j * b3.sizeX;
+                for (int i = minX; i < maxX; i++, offset++)
+                    if (!_mask[offset])
+                    {
+                        outSum += _data[i];
+                        outCpt++;
+                    }
+            }
+        }
+        
+        return outCpt == 0 ? 0 : outSum / outCpt;
+    }
+
     
     @Override
     public double getDistanceToEdge(Point3d p)

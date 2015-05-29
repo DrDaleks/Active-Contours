@@ -12,6 +12,7 @@ import icy.sequence.Sequence;
 import icy.system.IcyHandledException;
 import icy.type.DataType;
 import icy.type.collection.array.Array1DUtil;
+import icy.type.rectangle.Rectangle3D;
 
 import java.awt.BasicStroke;
 import java.awt.Color;
@@ -26,6 +27,8 @@ import java.awt.geom.PathIterator;
 import java.awt.geom.Point2D;
 import java.awt.geom.Rectangle2D;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.TreeSet;
@@ -141,9 +144,7 @@ public class Polygon2D extends ActiveContour
             addPoint(new Point3d(contour.points.get(i)));
         }
         
-        updateNormals();
-        
-        updatePath();
+        updateMetaData();
         counterClockWise = contour.counterClockWise;
     }
     
@@ -155,6 +156,8 @@ public class Polygon2D extends ActiveContour
         {
             throw new IcyHandledException("Active contours: invalid ROI. Only Rectangle, Ellipse, Polygon and Area are supported");
         }
+        
+        setZ(roi.getZ());
         
         if (roi instanceof ROI2DArea)
         {
@@ -598,11 +601,13 @@ public class Polygon2D extends ActiveContour
         
         Point3d p;
         Vector3d f, norm, cvms = new Vector3d();
-        double val, inDiff, outDiff, sum;
+        double val, inDiff, outDiff, forceFactor;
         int n = points.size();
         
         int width = imageData.getWidth();
         int height = imageData.getHeight();
+        
+        weight *= sampling.getValue();
         
         int myZ = (int) Math.round(getZ());
         float[] _data = imageData.getDataXYAsFloat(0, myZ, channel);
@@ -619,17 +624,16 @@ public class Polygon2D extends ActiveContour
             
             val = getPixelValue(_data, width, height, p.x, p.y);
             
+            
             inDiff = val - cin;
             inDiff *= inDiff;
             
             outDiff = val - cout;
             outDiff *= outDiff;
             
-            sum = weight * sampling.getValue() * (sensitivity * outDiff) - (inDiff / sensitivity);
+            forceFactor = weight * (sensitivity * outDiff) - (inDiff / sensitivity);
             
-            cvms.scale(counterClockWise ? -sum : sum, norm);
-            
-            // if (cvms.dot(norm) < 0) cvms.scale(1.25);
+            cvms.scale(counterClockWise ? -forceFactor : forceFactor, norm);
             
             f.add(cvms);
         }
@@ -1467,23 +1471,22 @@ public class Polygon2D extends ActiveContour
     {
         if (Icy.getMainInterface().isHeadLess()) return;
         
-        synchronized (path)
+        Path2D.Double newPath = new Path2D.Double();
+        
+        int nbPoints = points.size();
+        
+        Point3d p = points.get(0);
+        newPath.moveTo(p.x, p.y);
+        
+        for (int i = 1; i < nbPoints; i++)
         {
-            path.reset();
-            
-            int nbPoints = points.size();
-            
-            Point3d p = points.get(0);
-            path.moveTo(p.x, p.y);
-            
-            for (int i = 1; i < nbPoints; i++)
-            {
-                p = points.get(i);
-                path.lineTo(p.x, p.y);
-            }
-            
-            path.closePath();
+            p = points.get(i);
+            newPath.lineTo(p.x, p.y);
         }
+        
+        newPath.closePath();
+        
+        this.path = newPath;
     }
     
     @Override
@@ -1519,45 +1522,36 @@ public class Polygon2D extends ActiveContour
         return roi;
     }
     
-    @Override
-    public double computeAverageIntensity(Sequence imageData_float, int channel, BooleanMask3D mask)
+    public double computeAverageIntensity(Sequence summedImageData, BooleanMask3D mask)
     {
-        int myZ = (int) Math.round(getZ());
+        int myZ = (int) z;
         
-        if (myZ == -1 && imageData_float.getSizeZ() == 1) myZ = 0;
+        if (myZ == -1 && summedImageData.getSizeZ() == 1) myZ = 0;
         
-        float[] _data = imageData_float.getDataXYAsFloat(0, myZ, channel);
-        if (_data == null) throw new IllegalArgumentException("Contour.getZ() = " + getZ() + "; Stack size = " + imageData_float.getSizeZ());
+        float[] _data = summedImageData.getDataXYAsFloat(0, myZ, 0);
+        if (_data == null) throw new IllegalArgumentException("Contour.getZ() = " + getZ() + "; Stack size = " + summedImageData.getSizeZ());
         
         boolean[] _mask = (mask == null ? null : mask.mask.get(myZ).mask);
         
-        int sizeX = imageData_float.getWidth();
-        int sizeY = imageData_float.getHeight();
+        int w = summedImageData.getSizeX();
+        int h = summedImageData.getSizeY();
+        double sum = 0, count = 0;
         
-        // compute the interior mean intensity
-        double inSum = 0, inCpt = 0;
-        // double outSum = 0, outCpt = 0;
         Point3d minBounds = new Point3d();
         Point3d maxBounds = new Point3d();
         boundingBox.getLower(minBounds);
         boundingBox.getUpper(maxBounds);
         
-        int minX = Math.max((int) minBounds.x - 10, -1);
-        int maxX = Math.min((int) maxBounds.x + 10, sizeX);
-        int minY = Math.max((int) minBounds.y - 10, 0);
-        int maxY = Math.min((int) maxBounds.y + 10, sizeY);
-        
+        int minY = Math.max((int) minBounds.y - 1, 0);
+        int maxY = Math.min((int) maxBounds.y + 1, h);
         int n = points.size();
+        
+        ArrayList<Integer> crosses = new ArrayList<Integer>(10);
         Point3d p1 = null, p2 = null;
-        TreeSet<Integer> crosses = new TreeSet<Integer>();
         
         for (int j = minY; j < maxY; j++)
         {
-            int offset = j * sizeX + minX;
-            
             crosses.clear();
-            crosses.add(minX);
-            
             for (int p = 0; p < n - 1; p++)
             {
                 p1 = points.get(p);
@@ -1569,58 +1563,61 @@ public class Polygon2D extends ActiveContour
             
             if (j > Math.min(p1.y, p2.y) && j < Math.max(p1.y, p2.y)) crosses.add((int) Math.round((p1.x + p2.x) * 0.5));
             
-            crosses.add(maxX);
+            if (crosses.size() == 0 || crosses.size() % 2 == 1) continue;
             
-            int nC = crosses.size();
+            Collections.sort(crosses);
             
-            if (nC == 2)
+            int lineOffset = j * w;
+            for (int c = 0; c < crosses.size(); c += 2)
             {
-                // for (int i = minX + 1; i < maxX - 1; i++, offset++)
-                // {
-                // outSum += _data[offset];
-                // outCpt++;
-                // }
-            }
-            else
-            {
-                boolean in = false;
+                int crossIN = crosses.get(c);
+                int crossOUT = crosses.get(c + 1);
                 
-                Iterator<Integer> it = crosses.iterator();
-                int start = it.next();
-                if (start < 0) start = 0;
-                
-                while (it.hasNext())
-                {
-                    int end = it.next();
-                    if (end > sizeX) end = sizeX;
-                    
-                    if (in)
-                    {
-                        for (int i = start; i < end; i++, offset++)
-                        {
-                            if (offset < 0 || offset >= _data.length) continue;
-                            _mask[offset] = true;
-                            inSum += _data[offset];
-                            inCpt++;
-                        }
-                    }
-                    else
-                    {
-                        // for (int i = start; i < end; i++, offset++)
-                        // {
-                        // outSum += _data[offset];
-                        // outCpt++;
-                        // }
-                        offset += end - start + 1;
-                    }
-                    
-                    start = end;
-                    in = !in;
-                }
+                sum -= getPixelValue(_data, w, h, crossIN, j);
+                sum += getPixelValue(_data, w, h, crossOUT, j);
+                count += crossOUT - crossIN;
+                if (mask != null) Arrays.fill(_mask, lineOffset + crossIN, lineOffset + crossOUT, true);
             }
         }
-        // cout = outSum / outCpt;
-        return inSum / inCpt;
+        
+        return sum / count;
+    }
+    
+    public double computeBackgroundIntensity(Sequence imageData, BooleanMask3D mask)
+    {
+        Rectangle3D.Integer b3 = mask.bounds;
+        
+        // attempt to calculate a localised average outside each contour
+        Point3d min = new Point3d(), max = new Point3d();
+        
+        boundingBox.getLower(min);
+        boundingBox.getUpper(max);
+        
+        double yExtent = max.y - min.y;
+        int minY = Math.max(0, (int) Math.round(min.y - yExtent));
+        int maxY = Math.min(b3.sizeY, (int) Math.round(max.y + yExtent));
+        
+        double xExtent = max.x - min.x;
+        int minX = Math.max(0, (int) Math.round(min.x - xExtent));
+        int maxX = Math.min(b3.sizeX, (int) Math.round(max.x + xExtent));
+        
+        double outSum = 0, outCpt = 0;
+        
+        boolean[] _mask = mask.mask.get((int) z).mask;
+        float[] _data = imageData.getDataXYAsFloat(0, (int) z, 0);
+        
+        for (int j = minY; j < maxY; j++)
+        {
+            int offset = minX + j * b3.sizeX;
+            for (int i = minX; i < maxX; i++, offset++)
+                if (!_mask[offset])
+                {
+                    outSum += _data[i];
+                    outCpt++;
+                }
+        }
+        
+        return outSum / outCpt;
     }
     
     @Override

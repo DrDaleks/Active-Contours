@@ -24,15 +24,15 @@ import plugins.nchenouard.spot.Detection;
  */
 public abstract class ActiveContour extends Detection implements Iterable<Point3d>
 {
-    protected final Processor      processor                  = new Processor(SystemUtil.getNumberOfCPUs() * 2);
+    protected final Processor      processor      = new Processor(SystemUtil.getNumberOfCPUs() * 2);
     
     protected SlidingWindow        convergence;
     
-    protected VarDouble            sampling                   = new VarDouble("sampling", 1.0);
+    protected VarDouble            sampling       = new VarDouble("sampling", 1.0);
     
-    protected final BoundingSphere boundingSphere             = new BoundingSphere();
+    protected final BoundingSphere boundingSphere = new BoundingSphere();
     
-    protected final BoundingBox    boundingBox                = new BoundingBox();
+    protected final BoundingBox    boundingBox    = new BoundingBox();
     
     protected Var<Double>          divisionSensitivity;
     
@@ -142,10 +142,8 @@ public abstract class ActiveContour extends Detection implements Iterable<Point3
      * Compute the average image intensity inside the contour on the specified image data, and fill
      * out the mask buffer to allow the global exterior mean to be computed
      * 
-     * @param imageData
-     *            the data on which the average intensity should be computed
-     * @param channel
-     *            the channel on which the average intensity should be computed
+     * @param summedImageData
+     *            the summed image data on which the average intensity should be computed
      * @param mask
      *            the boolean mask where this contour should be rasterised
      * @return the average intensity inside the contour
@@ -153,7 +151,23 @@ public abstract class ActiveContour extends Detection implements Iterable<Point3
      *             if the contour becomes extremely thin to the point where it contains no pixel to
      *             measure intensity
      */
-    public abstract double computeAverageIntensity(Sequence imageData, int channel, BooleanMask3D mask) throws TopologyException;
+    public abstract double computeAverageIntensity(Sequence summedImageData, BooleanMask3D mask) throws TopologyException;
+    
+    /**
+     * Compute the average image intensity locally outside the contour on the specified image data.
+     * When this method is called, the provided mask should already have been filled by *all*
+     * contours, so as to ensure that the measure average is unbiased
+     * 
+     * @param imageData
+     *            the data on which the average intensity should be computed
+     * @param channel
+     *            the channel on which the average intensity should be computed
+     * @param mask
+     *            the boolean mask where all contours (including the current one) have already been
+     *            rasterised
+     * @return the average intensity outside the contour
+     */
+    public abstract double computeBackgroundIntensity(Sequence imageData, BooleanMask3D mask);
     
     /**
      * Tests whether the given point is inside the contour, and if so returns the penetration depth

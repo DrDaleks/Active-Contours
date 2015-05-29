@@ -22,6 +22,7 @@ import icy.system.thread.Processor;
 import icy.system.thread.ThreadUtil;
 import icy.type.DataType;
 import icy.type.rectangle.Rectangle3D;
+import icy.util.OMEUtil;
 import icy.util.ShapeUtil.BooleanOperator;
 import icy.util.StringUtil;
 
@@ -29,12 +30,11 @@ import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
@@ -63,7 +63,7 @@ import plugins.adufour.ezplug.EzVarSequence;
 import plugins.adufour.filtering.Convolution1D;
 import plugins.adufour.filtering.ConvolutionException;
 import plugins.adufour.filtering.Kernels1D;
-import plugins.adufour.hierarchicalkmeans.HierarchicalKMeans;
+import plugins.adufour.hierarchicalkmeans.HKMeans;
 import plugins.adufour.roi.TemporalROI;
 import plugins.adufour.vars.lang.Var;
 import plugins.adufour.vars.lang.VarBoolean;
@@ -99,6 +99,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     public final EzVarDimensionPicker region_c              = new EzVarDimensionPicker("Find regions in channel", DimensionId.C, input);
     public final EzVarDouble          region_weight         = new EzVarDouble("Region weight", 1.0, 0.0, 1.0, 0.1);
     public final EzVarDouble          region_sensitivity    = new EzVarDouble("Region sensitivity", 1.0, 0.2, 5.0, 0.1);
+    public final EzVarBoolean         region_localise       = new EzVarBoolean("Variable background", false);
     
     public final EzVarDouble          balloon_weight        = new EzVarDouble("Contour inflation", 0, -0.5, 0.5, 0.001);
     
@@ -171,6 +172,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     private BooleanMask3D                               contourMask_buffer;
     
     private Sequence                                    region_data;
+    private Sequence                                    region_data_summed;
     private HashMap<TrackSegment, Double>               region_cin              = new HashMap<TrackSegment, Double>(0);
     private HashMap<TrackSegment, Double>               region_cout             = new HashMap<TrackSegment, Double>(0);
     
@@ -223,8 +225,11 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         region.setToolTipText("Sets the contour(s) to isolate homogeneous intensity regions");
         region_weight.setToolTipText("Set to 0 to deactivate this parameter");
         region_sensitivity.setToolTipText("Increase this value to be more sensitive to dim objects (default: 1)");
+        region_localise.setToolTipText("Check this box if the image background is noisy or non-homogeneous");
         showAdvancedOptions.addVisibilityTriggerTo(region_sensitivity, true);
-        region.addEzComponent(region_c, region_weight, region_sensitivity);
+        // don't show local means (for now)
+        showAdvancedOptions.addVisibilityTriggerTo(region_localise, true);
+        region.addEzComponent(region_c, region_weight, region_sensitivity);//, region_localise);
         addEzComponent(region);
         
         // coupling
@@ -277,11 +282,11 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         output_roiType.setToolTipText("Select the type of ROI to export");
         addEzComponent(output_roiType);
         output_rois.addVisibilityTriggerTo(output_roiType, ExportROI.ON_INPUT, ExportROI.ON_NEW_IMAGE);
-
+        
         // tracking
         tracking.setToolTipText("Track objects over time");
         addEzComponent(tracking);
-
+        
         output_toi.setToolTipText("EXPERIMENTAL: export a single temporal ROI for each track instead of a ROI for each time point");
         addEzComponent(output_toi);
         output_rois.addVisibilityTriggerTo(output_toi, ExportROI.ON_INPUT, ExportROI.ON_NEW_IMAGE);
@@ -412,10 +417,8 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                         vol += volume;
                     vol /= volumes.values().size();
                     
-                    Map<Integer, List<ConnectedComponent>> map = null;
                     Sequence currentT = SequenceUtil.extractFrame(inputData, t);
-                    map = HierarchicalKMeans.hierarchicalKMeans(currentT, 4, 10, (int) vol / 10, (int) vol, (Sequence) null);
-                    newObjects.addAll(map.get(0));
+                    newObjects.addAll(HKMeans.hKMeans(currentT, 4.0, 10, (int) vol / 10, (int) vol, 0.0, null));
                 }
                 catch (ConvolutionException e)
                 {
@@ -529,11 +532,22 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         // get the current frame (in its original data type)
         Sequence currentFrame = SequenceUtil.extractFrame(inputData, t);
         
-        // extract the edge and region data, rescale to [0,1]
-        edgeData = SequenceUtil.extractChannel(currentFrame, edge_c.getValue());
-        edgeData = SequenceUtil.convertToType(edgeData, DataType.FLOAT, true, true);
+        Rectangle3D.Integer bounds = new Rectangle3D.Integer();
+        bounds.sizeX = inputData.getSizeX();
+        bounds.sizeY = inputData.getSizeY();
+        bounds.sizeZ = inputData.getSizeZ();
         
-        region_data = SequenceUtil.extractChannel(currentFrame, region_c.getValue());
+        // extract the edge and region data, rescale to [0,1]
+        edgeData = new Sequence(OMEUtil.createOMEMetadata(inputData.getMetadata()), "edge data");
+        region_data = new Sequence(OMEUtil.createOMEMetadata(inputData.getMetadata()), "region data");
+        
+        for (int z = 0; z < bounds.sizeZ; z++)
+        {
+            edgeData.setImage(0, z, currentFrame.getImage(0, z, edge_c.getValue()));
+            region_data.setImage(0, z, currentFrame.getImage(0, z, region_c.getValue()));
+        }
+        
+        edgeData = SequenceUtil.convertToType(edgeData, DataType.FLOAT, true, true);
         region_data = SequenceUtil.convertToType(region_data, DataType.FLOAT, true, true);
         
         // smooth the signal
@@ -549,14 +563,21 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             System.err.println("Warning: error while smoothing the signal: " + e.getMessage());
         }
         
+        // Summed region data (use to accelerate intensity calculations)
+        region_data_summed = SequenceUtil.getCopy(region_data);
+        for (int z = 0; z < bounds.sizeZ; z++)
+        {
+            float[] regionDataSliceSummed = region_data_summed.getDataXYAsFloat(0, z, 0);
+            
+            for (int j = 0, offset = 1; j < bounds.sizeY; j++, offset++)
+                for (int i = 1; i < bounds.sizeX; i++, offset++)
+                    regionDataSliceSummed[offset] += regionDataSliceSummed[offset - 1];
+        }
+        
         // initialize the mask buffer (used to calculate average intensities inside/outside
         if (isFirstFrame)
         {
-            Rectangle3D.Integer bounds = new Rectangle3D.Integer();
-            bounds.sizeX = inputData.getSizeX();
-            bounds.sizeY = inputData.getSizeY();
-            bounds.sizeZ = inputData.getSizeZ();
-            BooleanMask2D[] maskSlices = new BooleanMask2D[inputData.getSizeZ()];
+            BooleanMask2D[] maskSlices = new BooleanMask2D[bounds.sizeZ];
             
             for (int z = 0; z < inputData.getSizeZ(); z++)
                 maskSlices[z] = new BooleanMask2D(inputData.getBounds2D(), new boolean[bounds.sizeX * bounds.sizeY]);
@@ -582,13 +603,11 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 
                 ActiveContour previousContour = (ActiveContour) previous;
                 
-                previousContour.clean();
-                
                 ActiveContour clone = previousContour.clone();
                 clone.convergence.setSize(convergence_winSize.getValue() * 2);
                 clone.setT(t);
                 segment.addDetection(clone);
-                //
+                
                 // if (volumes.containsKey(segment))
                 // {
                 // // un-comment to store volumes after each frame
@@ -878,7 +897,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                     break;
                 }
                 
-                if (updateRegionStatistics) updateRegionInformation(t);
+                if (updateRegionStatistics) updateRegionStatistics();
             }
             
             // compute deformations issued from the energy minimization
@@ -906,8 +925,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             }
         }
         
-        // System.out.println("[Active Contours] Converged on frame " + t + " in " + iter +
-        // " iterations");
+        System.out.println("[Active Contours] Converged on frame " + t + " in " + iter + " iterations");
     }
     
     /**
@@ -1140,71 +1158,40 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             }
         }
         
-        if (change.getValue() && region_weight.getValue() > EPSILON) updateRegionInformation(t);
+        if (change.getValue() && region_weight.getValue() > EPSILON) updateRegionStatistics();
     }
     
-    private void updateRegionInformation(int t)
+    private void updateRegionStatistics()
     {
-        if (allContoursAtTimeT.size() == 0) return;
+        updateRegionStatistics(region_localise.getValue());
+    }
+    
+    private void updateRegionStatistics(boolean locally)
+    {
+        int nbContours = allContoursAtTimeT.size();
         
-        if (allContoursAtTimeT.size() == 1)
+        if (nbContours == 0) return;
+        
+        // use a global mask for global statistics
+        if (!locally) for (BooleanMask2D slice : contourMask_buffer.mask.values())
+            Arrays.fill(slice.mask, false);
+        
+        if (nbContours == 1)
         {
-            ActiveContour contour = allContoursAtTimeT.iterator().next();
-            TrackSegment segment = trackGroup.getValue().getTrackSegmentWithDetection(contour);
-            
-            // only update on the first contour of the segment (first time point)
-            // if (segment.getFirstDetection() != contour) return;
-            
-            try
-            {
-                double cin = contour.computeAverageIntensity(region_data, 0, contourMask_buffer);
-                synchronized (region_cin)
-                {
-                    region_cin.put(segment, cin);
-                }
-            }
-            catch (TopologyException topo)
-            {
-                System.err.println("Removing a contour. Reason: " + topo.getMessage());
-                allContoursAtTimeT.remove(contour);
-                evolvingContoursAtTimeT.remove(contour);
-            }
+            // use the current thread
+            new LocalRegionStatisticsComputer(allContoursAtTimeT.iterator().next(), !locally).call();
         }
         else
         {
-            ArrayList<Future<?>> tasks = new ArrayList<Future<?>>(allContoursAtTimeT.size());
-            
-            for (final ActiveContour contour : allContoursAtTimeT)
-                tasks.add(multiThreadService.submit(new Runnable()
-                {
-                    public void run()
-                    {
-                        TrackSegment segment = trackGroup.getValue().getTrackSegmentWithDetection(contour);
-                        
-                        // only update on the first contour of the segment (first time point)
-                        // if (segment.getFirstDetection() != contour) return;
-                        
-                        try
-                        {
-                            double cin = contour.computeAverageIntensity(region_data, 0, contourMask_buffer);
-                            synchronized (region_cin)
-                            {
-                                region_cin.put(segment, cin);
-                            }
-                        }
-                        catch (TopologyException topo)
-                        {
-                            System.err.println("Removing a contour. Reason: " + topo.getMessage());
-                            allContoursAtTimeT.remove(contour);
-                            evolvingContoursAtTimeT.remove(contour);
-                        }
-                    }
-                }));
+            // use multiple threads
+            Collection<Callable<Object>> updaters = new ArrayList<Callable<Object>>(allContoursAtTimeT.size());
+            for (ActiveContour contour : allContoursAtTimeT)
+                updaters.add(new LocalRegionStatisticsComputer(contour, !locally));
             
             try
             {
-                for (Future<?> task : tasks)
-                    task.get();
+                for (Future<?> updater : multiThreadService.invokeAll(updaters))
+                    updater.get();
             }
             catch (InterruptedException e)
             {
@@ -1219,52 +1206,136 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             }
         }
         
-        int sizeZ = contourMask_buffer.bounds.sizeZ;
+        updateBackgroundStatistics(locally);
+    }
+    
+    private class LocalRegionStatisticsComputer implements Callable<Object>
+    {
+        final ActiveContour contour;
+        final boolean       maskBased;
         
-        double[] outs = new double[sizeZ];
-        
-        for (int z = 0; z < sizeZ; z++)
+        public LocalRegionStatisticsComputer(ActiveContour contour, boolean maskBased)
         {
-            double outSumSlice = 0, outCptSlice = 0;
-            
-            boolean[] _mask = contourMask_buffer.mask.get(z).mask;
-            float[] _data = region_data.getDataXYAsFloat(0, z, 0);
-            
-            for (int i = 0; i < _mask.length; i++)
-            {
-                if (_mask[i])
-                {
-                    // erase the mask for the next iteration
-                    _mask[i] = false;
-                }
-                else
-                {
-                    double value = _data[i];
-                    outSumSlice += value;
-                    outCptSlice++;
-                }
-            }
-            
-            outs[z] = outSumSlice / outCptSlice;
+            this.contour = contour;
+            this.maskBased = maskBased;
         }
         
-        for (ActiveContour contour : allContoursAtTimeT)
+        @Override
+        public Object call()
         {
-            TrackSegment segment = trackGroup.getValue().getTrackSegmentWithDetection(contour);
-            if (contour instanceof Polygon2D)
+            try
             {
-                double cout = outs[(int) Math.round(contour.getZ())];
-                region_cout.put(segment, cout);
-                // System.out.println("  out: " + cout);
+                double cin = contour.computeAverageIntensity(contour instanceof Mesh3D ? region_data : region_data_summed, maskBased ? contourMask_buffer : null);
+                region_cin.put(trackGroup.getValue().getTrackSegmentWithDetection(contour), cin);
+            }
+            catch (TopologyException topo)
+            {
+                System.err.println("Removing a contour. Reason: " + topo.getMessage());
+                allContoursAtTimeT.remove(contour);
+                evolvingContoursAtTimeT.remove(contour);
+            }
+            return null;
+        }
+    }
+    
+    private void updateBackgroundStatistics(boolean locally)
+    {
+        int nbContours = allContoursAtTimeT.size();
+        
+        if (nbContours == 0) return;
+        
+        if (locally)
+        {
+            if (nbContours == 1)
+            {
+                // use the current thread
+                new LocalBackgroundStatisticsComputer(allContoursAtTimeT.iterator().next()).call();
             }
             else
             {
-                double cout = ArrayMath.mean(outs);
-                region_cout.put(segment, cout);
-                // System.out.println("  out: " + cout);
+                // use multiple threads
+                Collection<Callable<Object>> updaters = new ArrayList<Callable<Object>>(allContoursAtTimeT.size());
+                for (ActiveContour contour : allContoursAtTimeT)
+                    updaters.add(new LocalBackgroundStatisticsComputer(contour));
+                
+                try
+                {
+                    for (Future<?> updater : multiThreadService.invokeAll(updaters))
+                        updater.get();
+                }
+                catch (InterruptedException e)
+                {
+                    // reset the interrupted flag
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+                catch (ExecutionException e)
+                {
+                    e.getCause().printStackTrace();
+                    throw new RuntimeException(e);
+                }
             }
         }
+        else
+        {
+            double[] outs = new double[inputData.getSizeZ()];
+            
+            for (int z = 0; z < outs.length; z++)
+            {
+                double outSumSlice = 0, outCptSlice = 0;
+                
+                boolean[] _mask = contourMask_buffer.mask.get(z).mask;
+                float[] _data = region_data.getDataXYAsFloat(0, z, 0);
+                
+                for (int i = 0; i < _mask.length; i++)
+                    if (!_mask[i])
+                    {
+                        outSumSlice += _data[i];
+                        outCptSlice++;
+                    }
+                
+                outs[z] = outSumSlice / outCptSlice;
+            }
+            
+            for (ActiveContour contour : allContoursAtTimeT)
+            {
+                TrackSegment segment = trackGroup.getValue().getTrackSegmentWithDetection(contour);
+                if (contour instanceof Polygon2D)
+                {
+                    double cout = outs[(int) Math.round(contour.getZ())];
+                    region_cout.put(segment, cout);
+                    // System.out.println("  out: " + cout);
+                }
+                else
+                {
+                    double cout = ArrayMath.mean(outs);
+                    region_cout.put(segment, cout);
+                    // System.out.println("  out: " + cout);
+                }
+            }
+        }
+    }
+    
+    private class LocalBackgroundStatisticsComputer implements Callable<Object>
+    {
+        final ActiveContour contour;
         
+        public LocalBackgroundStatisticsComputer(ActiveContour contour)
+        {
+            this.contour = contour;
+        }
+        
+        @Override
+        public Object call()
+        {
+            TrackSegment segment = trackGroup.getValue().getTrackSegmentWithDetection(contour);
+            
+            double cout = contour.computeBackgroundIntensity(region_data, contourMask_buffer);
+            
+            region_cout.put(segment, cout);
+            
+            return null;
+        }
     }
     
     @SuppressWarnings("unchecked")
