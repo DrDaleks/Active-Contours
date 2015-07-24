@@ -109,7 +109,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     
     public final EzGroup              evolution             = new EzGroup("Evolution parameters");
     public final EzVarSequence        evolution_bounds      = new EzVarSequence("Bound field to ROI of");
-    public final EzVarDouble          contour_resolution    = new EzVarDouble("Contour sampling", 2, 0.1, 1000.0, 0.1);
+    public final EzVarDouble          contour_resolution    = new EzVarDouble("Contour sampling", 2, 0.1, 10000.0, 0.1);
     public final EzVarDouble          contour_timeStep      = new EzVarDouble("Evolution time step", 0.1, 0.1, 10, 0.01);
     public final EzVarInteger         convergence_winSize   = new EzVarInteger("Convergence window size", 50, 10, 10000, 10);
     public final EzVarEnum<Operation> convergence_operation = new EzVarEnum<SlidingWindow.Operation>("Convergence operation", Operation.values(), Operation.VAR_COEFF);
