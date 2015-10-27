@@ -110,6 +110,14 @@ public class Polygon2D extends ActiveContour
     
     private boolean              counterClockWise;
     
+    /**
+     * For XML loading purposes only
+     */
+    public Polygon2D()
+    {
+        super();
+    }
+    
     protected Polygon2D(Var<Double> sampling, SlidingWindow convergenceWindow)
     {
         super(sampling, convergenceWindow);
