@@ -42,6 +42,7 @@ import org.jfree.chart.renderer.xy.XYItemRenderer;
 import org.jfree.data.xy.XYSeries;
 import org.jfree.data.xy.XYSeriesCollection;
 
+import plugins.adufour.activecontours.ActiveContours.ROIType;
 import plugins.adufour.quickhull.QuickHull3D;
 import plugins.adufour.roi.mesh.Vertex3D;
 import plugins.adufour.roi.mesh.polygon.ROI3DTriangularMesh;
@@ -63,8 +64,11 @@ public class DeformationProfiler extends PluginTrackManagerProcessor implements 
     private enum Descriptors
     {
         None("None"),
-        Norm1("Surface area"),
-        Norm2("Volume"),
+        Width("Box width"),
+        Height("Box height"),
+        Depth("Box height"),
+        Norm1("Perimeter (2D) or surface area (3D)"),
+        Norm2("Surface (2D) or Volume (3D)"),
         Roundness("Roundness (min radius / max radius)"),
         Convexity("Solidity (area / convex area)"),
         Smoothness("Contour smoothness"),
@@ -86,15 +90,15 @@ public class DeformationProfiler extends PluginTrackManagerProcessor implements 
         }
     }
     
-    private JComboBox jComboDescriptors     = new JComboBox(Descriptors.values());
+    private JComboBox jComboDescriptors = new JComboBox(Descriptors.values());
     
-    private JButton   jButtonSaveToVTK      = new JButton("Export meshes to VTK files");
+    private JButton jButtonSaveToVTK = new JButton("Export meshes to VTK files");
     
-    private JButton   jButtonSaveShapeToXLS = new JButton("Export shape measures to XLS");
+    private JButton jButtonSaveShapeToXLS = new JButton("Export shape measures to XLS");
     
-    private JPanel    chartPanel            = new JPanel();
+    private JPanel chartPanel = new JPanel();
     
-    private double    tScale;
+    private double tScale;
     
     public DeformationProfiler()
     {
@@ -122,7 +126,7 @@ public class DeformationProfiler extends PluginTrackManagerProcessor implements 
         
         panel.add(GuiUtil.createLineBoxPanel(Box.createHorizontalStrut(10), new JLabel("Plot descriptor:"), Box.createHorizontalStrut(10), jComboDescriptors,
                 Box.createHorizontalStrut(10)));
-        
+                
         jComboDescriptors.addActionListener(new ActionListener()
         {
             public void actionPerformed(ActionEvent e)
@@ -223,46 +227,61 @@ public class DeformationProfiler extends PluginTrackManagerProcessor implements 
         case None:
             return;
             
+        case Width:
+            double[][] w = computeBoxWidth();
+            chart = createChartPanel(w, descriptor.toString(), "Time (sec.)", "\u03BC" + "m\u00B2");
+            break;
+            
+        case Height:
+            double[][] h = computeBoxHeight();
+            chart = createChartPanel(h, descriptor.toString(), "Time (sec.)", "\u03BC" + "m\u00B2");
+            break;
+            
+        case Depth:
+            double[][] d = computeBoxDepth();
+            chart = createChartPanel(d, descriptor.toString(), "Time (sec.)", "\u03BC" + "m\u00B2");
+            break;
+            
         case Norm1:
             double[][] dim1 = computeDimension(1);
             chart = createChartPanel(dim1, descriptor.toString(), "Time (sec.)", "\u03BC" + "m\u00B2");
             break;
-        
+            
         case Norm2:
             double[][] dim2 = computeDimension(2);
             chart = createChartPanel(dim2, descriptor.toString(), "Time (sec.)", "\u03BC" + "m\u00B3");
             break;
-        
+            
         case Roundness:
             double[][] roundness = computeRoundness();
             chart = createChartPanel(roundness, descriptor.toString(), "Time (sec.)", "%");
             break;
-        
+            
         case Sphericity:
             double[][] radiivar = computeSphericity();
             chart = createChartPanel(radiivar, descriptor.toString(), "Time (sec.)", "%");
             break;
-        
+            
         case Convexity:
             double[][] convexHullDiff = computeConvexity();
             chart = createChartPanel(convexHullDiff, descriptor.toString(), "Time (sec.)", "%");
             break;
-        
+            
         case Smoothness:
             double[][] roughness = computeSmoothness();
             chart = createChartPanel(roughness, descriptor.toString(), "Time (sec.)", "%");
             break;
-        
+            
         case Elongation:
             double[][] elongation = computeElongation();
             chart = createChartPanel(elongation, descriptor.toString(), "Time (sec.)", "A.U.");
             break;
-        
+            
         case Flatness:
             double[][] flatness = computeFlatness();
             chart = createChartPanel(flatness, descriptor.toString(), "Time (sec.)", "%");
             break;
-        
+            
         default:
             throw new UnsupportedOperationException("\"" + descriptor.toString() + "\" measure is not yet implemented");
         }
@@ -274,13 +293,73 @@ public class DeformationProfiler extends PluginTrackManagerProcessor implements 
             XYItemRenderer renderer = ((XYPlot) chart.getChart().getPlot()).getRenderer();
             for (TrackSegment ts : trackPool.getTrackSegmentList())
                 renderer.setSeriesPaint(trackPool.getTrackIndex(ts), ts.getFirstDetection().getColor());
-            
+                
             chartPanel.add(chart);
         }
         
         super.panel.updateUI();
     }
     
+    private double[][] computeBoxWidth()
+    {
+        double[][] result = new double[trackPool.getTrackSegmentList().size()][trackPool.getDisplaySequence().getSizeT()];
+        
+        for (TrackSegment ts : trackPool.getTrackSegmentList())
+        {
+            int trackIndex = trackPool.getTrackIndex(ts);
+            
+            for (Detection det : ts.getDetectionList())
+            {
+                if (!(det instanceof ActiveContour)) continue;
+                
+                double value = ((ActiveContour) det).toROI(ROIType.POLYGON, trackPool.getDisplaySequence()).getBounds5D().getSizeX();
+                result[trackIndex][det.getT()] = value;
+            }
+        }
+        
+        return result;
+    }
+
+    private double[][] computeBoxHeight()
+    {
+        double[][] result = new double[trackPool.getTrackSegmentList().size()][trackPool.getDisplaySequence().getSizeT()];
+        
+        for (TrackSegment ts : trackPool.getTrackSegmentList())
+        {
+            int trackIndex = trackPool.getTrackIndex(ts);
+            
+            for (Detection det : ts.getDetectionList())
+            {
+                if (!(det instanceof ActiveContour)) continue;
+                
+                double value = ((ActiveContour) det).toROI(ROIType.POLYGON, trackPool.getDisplaySequence()).getBounds5D().getSizeY();
+                result[trackIndex][det.getT()] = value;
+            }
+        }
+        
+        return result;
+    }
+
+    private double[][] computeBoxDepth()
+    {
+        double[][] result = new double[trackPool.getTrackSegmentList().size()][trackPool.getDisplaySequence().getSizeT()];
+        
+        for (TrackSegment ts : trackPool.getTrackSegmentList())
+        {
+            int trackIndex = trackPool.getTrackIndex(ts);
+            
+            for (Detection det : ts.getDetectionList())
+            {
+                if (!(det instanceof ActiveContour)) continue;
+                
+                double value = ((ActiveContour) det).toROI(ROIType.POLYGON, trackPool.getDisplaySequence()).getBounds5D().getSizeZ();
+                result[trackIndex][det.getT()] = value;
+            }
+        }
+        
+        return result;
+    }
+
     private void exportShapeToXLS(String xlsPath)
     {
         try
@@ -357,7 +436,7 @@ public class DeformationProfiler extends PluginTrackManagerProcessor implements 
                 true, // include legend
                 true, // tooltips
                 false // urls
-                );
+        );
         
         return new ChartPanel(chart, 500, 300, 500, 300, 500, 300, false, false, true, true, true, true);
     }
@@ -371,7 +450,7 @@ public class DeformationProfiler extends PluginTrackManagerProcessor implements 
         // time labels
         for (int t = 0; t < trackPool.getDisplaySequence().getSizeT(); t++)
             XLSUtil.setCellNumber(sheet, t + 1, 0, t * tScale);
-        
+            
         // indexes + data
         for (int i = 0; i < trackPool.getTrackSegmentList().size(); i++)
         {
@@ -407,7 +486,7 @@ public class DeformationProfiler extends PluginTrackManagerProcessor implements 
                 int i = 0;
                 for (Point3d p : contour)
                     if (p != null) points[i++] = p;
-                
+                    
                 QuickHull3D q3d = new QuickHull3D(points);
                 int[][] hullFaces = q3d.getFaces();
                 Point3d[] hullPoints = q3d.getVertices();
@@ -450,9 +529,9 @@ public class DeformationProfiler extends PluginTrackManagerProcessor implements 
             
             for (Detection det : ts.getDetectionList())
             {
-                if (!(det instanceof Mesh3D)) continue;
+                if (!(det instanceof ActiveContour)) continue;
                 
-                double value = ((Mesh3D) det).getDimension(order);
+                double value = ((ActiveContour) det).getDimension(order);
                 result[trackIndex][det.getT()] = value;
             }
         }
@@ -784,7 +863,7 @@ public class DeformationProfiler extends PluginTrackManagerProcessor implements 
     @Override
     public void displaySequenceChanged()
     {
-        
+    
     }
     
     @Override
