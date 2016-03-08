@@ -94,21 +94,21 @@ public class Polygon2D extends ActiveContour
     
     private final FillHolesInROI holeFiller = new FillHolesInROI();
     
-    final ArrayList<Point3d>     points     = new ArrayList<Point3d>();
+    final ArrayList<Point3d> points = new ArrayList<Point3d>();
     
-    Path2D.Double                path       = new Path2D.Double();
+    Path2D.Double path = new Path2D.Double();
     
-    double                       cout       = 0.0;
+    double cout = 0.0;
     
-    private Vector3d[]           modelForces;
+    private Vector3d[] modelForces;
     
-    private Vector3d[]           contourNormals;
+    private Vector3d[] contourNormals;
     
-    private Vector3d[]           feedbackForces;
+    private Vector3d[] feedbackForces;
     
-    private Vector3d[]           volumeConstraintForces;
+    private Vector3d[] volumeConstraintForces;
     
-    private boolean              counterClockWise;
+    private boolean counterClockWise;
     
     /**
      * For XML loading purposes only
@@ -368,7 +368,7 @@ public class Polygon2D extends ActiveContour
                             // curvature has to be at a relative minimum
                             if (vi_lQ < 0.5 && vj_lQ < 0.5) continue;
                             
-                            // System.out.println(vi_lQ + "  |  " + vj_lQ);
+                            // System.out.println(vi_lQ + " | " + vj_lQ);
                             
                             // a real self-intersection is happening
                             selfIntersection = true;
@@ -631,7 +631,6 @@ public class Polygon2D extends ActiveContour
             // if (p.x <= 1 || p.y <= 1 || p.x >= width - 2 || p.y >= height - 2) continue;
             
             val = getPixelValue(_data, width, height, p.x, p.y);
-            
             
             inDiff = val - cin;
             inDiff *= inDiff;
@@ -1121,7 +1120,7 @@ public class Polygon2D extends ActiveContour
     }
     
     AnnounceFrame f = null; // new AnnounceFrame("ready");
-                            
+    
     @Override
     public void paint(Graphics2D g, Sequence sequence, IcyCanvas canvas)
     {
@@ -1189,7 +1188,7 @@ public class Polygon2D extends ActiveContour
             contourNormals = new Vector3d[n];
             for (int i = 0; i < n; i++)
                 contourNormals[i] = new Vector3d();
-            
+                
             updateNormals();
         }
         
@@ -1293,7 +1292,7 @@ public class Polygon2D extends ActiveContour
         java.util.Arrays.fill(mask, 0, bounds.width - 1, false);
         for (int o = 0; o < mask.length; o += bounds.width)
             mask[o] = false;
-        
+            
         for (int j = 0; j < bounds.height; j += grid)
             for (int i = 0, index = j * bounds.width; i < bounds.width; i += grid, index += grid)
             {
@@ -1354,7 +1353,7 @@ public class Polygon2D extends ActiveContour
                     }
                 }
                 else // a = b -> horizontal edge only if c is different
-                if (a != c)
+                    if (a != c)
                 {
                     if (a == false) // a,b are outside
                     {
@@ -1402,7 +1401,7 @@ public class Polygon2D extends ActiveContour
                     }
                 }
                 else // c = d -> horizontal edge only if b is different
-                if (b != c)
+                    if (b != c)
                 {
                     if (b == false) // c,d are inside
                     {
@@ -1417,7 +1416,7 @@ public class Polygon2D extends ActiveContour
                     }
                 }
             }
-        
+            
         if (segments.size() == 0) return;
         
         for (Point3d p : segments.get(0))
@@ -1514,14 +1513,14 @@ public class Polygon2D extends ActiveContour
             roi = new ROI2DArea();
             ((ROI2DArea) roi).addShape(path);
             break;
-        
+            
         case POLYGON:
             List<Point2D> p2d = new ArrayList<Point2D>(points.size());
             for (Point3d p : this)
                 p2d.add(new Point2D.Double(p.x, p.y));
             roi = new ROI2DPolygon(p2d);
             break;
-        
+            
         default:
             throw new IllegalArgumentException("ROI of type " + type + " cannot be exported yet");
         }
@@ -1584,7 +1583,19 @@ public class Polygon2D extends ActiveContour
                 sum -= getPixelValue(_data, w, h, crossIN, j);
                 sum += getPixelValue(_data, w, h, crossOUT, j);
                 count += crossOUT - crossIN;
-                if (mask != null) Arrays.fill(_mask, lineOffset + crossIN, lineOffset + crossOUT, true);
+                if (mask != null) try
+                {
+                    Arrays.fill(_mask, lineOffset + crossIN, lineOffset + crossOUT, true);
+                }
+                catch (ArrayIndexOutOfBoundsException e)
+                {
+                    String message = "Image size: " + w + " x " + h + "\n";
+                    message += "Line offset: " + lineOffset + "\n";
+                    message += "Cross IN: " + crossIN + "\n";
+                    message += "Cross OUT: " + crossOUT + "\n";
+                    message += "\n" + e.getMessage();
+                    throw new RuntimeException(message, e);
+                }
             }
         }
         
@@ -1756,6 +1767,6 @@ public class Polygon2D extends ActiveContour
      */
     public void rasterScan(final boolean updateLocalMask, final Sequence imageData, VarDouble averageIntensity, final BooleanMask3D imageMask)
     {
-        
+    
     }
 }

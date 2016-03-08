@@ -1,5 +1,22 @@
 package plugins.adufour.activecontours;
 
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
+
+import javax.vecmath.Point3d;
+import javax.vecmath.Tuple3d;
+
 import icy.gui.viewer.Viewer;
 import icy.image.IcyBufferedImage;
 import icy.main.Icy;
@@ -25,24 +42,6 @@ import icy.type.rectangle.Rectangle3D;
 import icy.util.OMEUtil;
 import icy.util.ShapeUtil.BooleanOperator;
 import icy.util.StringUtil;
-
-import java.awt.event.ActionEvent;
-import java.awt.event.ActionListener;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Future;
-import java.util.concurrent.RejectedExecutionException;
-
-import javax.vecmath.Point3d;
-import javax.vecmath.Tuple3d;
-
 import plugins.adufour.activecontours.SlidingWindow.Operation;
 import plugins.adufour.blocks.lang.Block;
 import plugins.adufour.blocks.util.VarList;
@@ -566,9 +565,17 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         {
             float[] regionDataSliceSummed = region_data_summed.getDataXYAsFloat(0, z, 0);
             
-            for (int j = 0, offset = 1; j < bounds.sizeY; j++, offset++)
+            for (int j = 0; j < bounds.sizeY; j++)
+            {
+                // start at the second pixel (index 1) of each line
+                int offset = j * bounds.sizeX + 1;
+                
                 for (int i = 1; i < bounds.sizeX; i++, offset++)
+                {
+                    // accumulate (add) each pixel with the previous
                     regionDataSliceSummed[offset] += regionDataSliceSummed[offset - 1];
+                }
+            }
         }
         
         // initialize the mask buffer (used to calculate average intensities inside/outside
