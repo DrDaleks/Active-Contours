@@ -66,7 +66,7 @@ public class DeformationProfiler extends PluginTrackManagerProcessor implements 
         None("None"),
         Width("Box width"),
         Height("Box height"),
-        Depth("Box height"),
+        Depth("Box depth"),
         Norm1("Perimeter (2D) or surface area (3D)"),
         Norm2("Surface (2D) or Volume (3D)"),
         Roundness("Roundness (min radius / max radius)"),
