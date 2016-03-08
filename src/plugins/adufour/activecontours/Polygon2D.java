@@ -166,6 +166,7 @@ public class Polygon2D extends ActiveContour
         }
         
         setZ(roi.getZ());
+        setName("Contour (" + roi.getName() + ")");
         
         if (roi instanceof ROI2DArea)
         {

@@ -83,6 +83,7 @@ public class Mesh3D extends ActiveContour
         public ActiveMesh(double sampling, ROI3D roi, Tuple3d pixelSize)
         {
             super(sampling, roi, pixelSize);
+            setName("Contour (" + roi.getName() + ")");
         }
         
         @Override

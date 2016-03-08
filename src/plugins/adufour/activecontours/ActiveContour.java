@@ -24,17 +24,19 @@ import plugins.nchenouard.spot.Detection;
  */
 public abstract class ActiveContour extends Detection implements Iterable<Point3d>
 {
-    protected static final Processor      processor      = new Processor(SystemUtil.getNumberOfCPUs() * 2);
+    protected static final Processor processor = new Processor(SystemUtil.getNumberOfCPUs() * 2);
     
-    protected SlidingWindow        convergence;
+    protected String name;
     
-    protected VarDouble            sampling       = new VarDouble("sampling", 1.0);
+    protected SlidingWindow convergence;
+    
+    protected VarDouble sampling = new VarDouble("sampling", 1.0);
     
     protected final BoundingSphere boundingSphere = new BoundingSphere();
     
-    protected final BoundingBox    boundingBox    = new BoundingBox();
+    protected final BoundingBox boundingBox = new BoundingBox();
     
-    protected Var<Double>          divisionSensitivity;
+    protected Var<Double> divisionSensitivity;
     
     /**
      * Constructor for XML loading purposes only
@@ -59,6 +61,16 @@ public abstract class ActiveContour extends Detection implements Iterable<Point3
         
         // give a random color
         setColor(Color.getHSBColor((float) Math.random(), 0.8f, 0.9f));
+    }
+    
+    public String getName()
+    {
+        return name;
+    }
+    
+    public void setName(String name)
+    {
+        this.name = name;
     }
     
     @Override
@@ -175,7 +187,8 @@ public abstract class ActiveContour extends Detection implements Iterable<Point3
      * 
      * @param p
      *            a point to test
-     * @return <ul>
+     * @return
+     *         <ul>
      *         <li/>if <code>p</code> is outside: <code>0</code>
      *         <li/>if <code>p</code> is inside: the distance from <code>p</code> to the contour
      *         edge

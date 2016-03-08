@@ -1405,7 +1405,14 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 }
                 else
                 {
-                    roi.setName("Object #" + StringUtil.toString(i, nbPaddingDigits + 1));
+                    if (contour.getName().isEmpty())
+                    {
+                        roi.setName("Object #" + StringUtil.toString(i, nbPaddingDigits + 1));
+                    }
+                    else
+                    {
+                        roi.setName(contour.getName());
+                    }
                     roi.setColor(contour.getColor());
                     rois.add(roi);
                 }
