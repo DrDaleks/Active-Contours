@@ -24,7 +24,7 @@ import plugins.nchenouard.spot.Detection;
  */
 public abstract class ActiveContour extends Detection implements Iterable<Point3d>
 {
-    protected final Processor      processor      = new Processor(SystemUtil.getNumberOfCPUs() * 2);
+    protected static final Processor      processor      = new Processor(SystemUtil.getNumberOfCPUs() * 2);
     
     protected SlidingWindow        convergence;
     
