@@ -216,7 +216,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         // edge
         edge.setToolTipText("Sets the contour(s) to follow image intensity gradients");
         edge_weight.setToolTipText("Negative (resp. positive) weight pushes contours toward decreasing (resp. increasing) intensities");
-        edge.addEzComponent(edge_c, edge_weight);
+        edge.add(edge_c, edge_weight);
         addEzComponent(edge);
         
         // region
@@ -227,7 +227,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         showAdvancedOptions.addVisibilityTriggerTo(region_sensitivity, true);
         // don't show local means (for now)
         showAdvancedOptions.addVisibilityTriggerTo(region_localise, true);
-        region.addEzComponent(region_c, region_weight, region_sensitivity);// , region_localise);
+        region.add(region_c, region_weight, region_sensitivity);// , region_localise);
         addEzComponent(region);
         
         // coupling
@@ -271,7 +271,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         evolution_bounds.setToolTipText("Bounds the evolution of the contour to all ROI of the given sequence (select \"No sequence\" to deactivate)");
         showAdvancedOptions.addVisibilityTriggerTo(evolution_bounds, true);
         
-        evolution.addEzComponent(evolution_bounds, contour_resolution, contour_timeStep, convergence_winSize, convergence_operation, convergence_criterion, convergence_nbIter);
+        evolution.add(evolution_bounds, contour_resolution, contour_timeStep, convergence_winSize, convergence_operation, convergence_criterion, convergence_nbIter);
         addEzComponent(evolution);
         
         // output
@@ -510,7 +510,20 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         {
             // remove the painter after processing
             if (overlay != null) overlay.remove();
+            
+            // the track group is of no longer use in headless mode
+            trackGroup.getValue().clearAllTrackSegment();
         }
+        
+        // clean other non-necessary stuff
+        region_cin.clear();
+        region_cout.clear();
+        allContoursAtTimeT.clear();
+        temporalROIs.clear();
+        inputData = null;
+        edgeData = null;
+        region_data = null;
+        region_data_summed = null;
     }
     
     private void initData(int t, boolean isFirstFrame)
@@ -1447,12 +1460,6 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     {
         if (inputData != null) inputData.removeOverlay(overlay);
         
-        // contoursMap.clear();
-        // contours.clear();
-        // trackGroup.clearTracks();
-        if (region_weight.getValue() > EPSILON) region_cin.clear();
-        
-        // meanUpdateService.shutdownNow();
         multiThreadService.shutdownNow();
     }
     

@@ -97,6 +97,7 @@ public class ActiveContoursOverlay extends Overlay implements SequenceListener
         }
         
         super.remove();
+        trackGroup.getSequence().removeOverlay(this);
     }
     
     @Override
