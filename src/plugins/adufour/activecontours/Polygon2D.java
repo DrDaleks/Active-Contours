@@ -1,19 +1,5 @@
 package plugins.adufour.activecontours;
 
-import icy.canvas.IcyCanvas;
-import icy.canvas.IcyCanvas2D;
-import icy.gui.frame.progress.AnnounceFrame;
-import icy.main.Icy;
-import icy.roi.BooleanMask2D;
-import icy.roi.BooleanMask3D;
-import icy.roi.ROI;
-import icy.roi.ROI2D;
-import icy.sequence.Sequence;
-import icy.system.IcyHandledException;
-import icy.type.DataType;
-import icy.type.collection.array.Array1DUtil;
-import icy.type.rectangle.Rectangle3D;
-
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Font;
@@ -36,6 +22,23 @@ import java.util.TreeSet;
 import javax.vecmath.Point3d;
 import javax.vecmath.Vector3d;
 
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+
+import icy.canvas.IcyCanvas;
+import icy.canvas.IcyCanvas2D;
+import icy.gui.frame.progress.AnnounceFrame;
+import icy.main.Icy;
+import icy.roi.BooleanMask2D;
+import icy.roi.BooleanMask3D;
+import icy.roi.ROI;
+import icy.roi.ROI2D;
+import icy.sequence.Sequence;
+import icy.system.IcyHandledException;
+import icy.type.DataType;
+import icy.type.collection.array.Array1DUtil;
+import icy.type.rectangle.Rectangle3D;
+import icy.util.XMLUtil;
 import plugins.adufour.activecontours.ActiveContours.ROIType;
 import plugins.adufour.activecontours.SlidingWindow.Operation;
 import plugins.adufour.morphology.FillHolesInROI;
@@ -94,21 +97,21 @@ public class Polygon2D extends ActiveContour
     
     private final FillHolesInROI holeFiller = new FillHolesInROI();
     
-    final ArrayList<Point3d> points = new ArrayList<Point3d>();
+    final ArrayList<Point3d>     points     = new ArrayList<Point3d>();
     
-    Path2D.Double path = new Path2D.Double();
+    Path2D.Double                path       = new Path2D.Double();
     
-    double cout = 0.0;
+    double                       cout       = 0.0;
     
-    private Vector3d[] modelForces;
+    private Vector3d[]           modelForces;
     
-    private Vector3d[] contourNormals;
+    private Vector3d[]           contourNormals;
     
-    private Vector3d[] feedbackForces;
+    private Vector3d[]           feedbackForces;
     
-    private Vector3d[] volumeConstraintForces;
+    private Vector3d[]           volumeConstraintForces;
     
-    private boolean counterClockWise;
+    private boolean              counterClockWise;
     
     /**
      * For XML loading purposes only
@@ -186,11 +189,11 @@ public class Polygon2D extends ActiveContour
             }
             catch (TopologyException e)
             {
-                int z = roi.getZ();
-                int t = roi.getT();
+                int theZ = roi.getZ();
+                int theT = roi.getT();
                 roi = new ROI2DEllipse(roi.getBounds2D());
-                roi.setZ(z);
-                roi.setT(t);
+                roi.setZ(theZ);
+                roi.setT(theT);
             }
         }
         
@@ -317,64 +320,62 @@ public class Polygon2D extends ActiveContour
                     selfIntersection = true;
                     break loop;
                 }
-                else
+                
+                // self-intersection always involves opposite normals
+                if (n_i.dot(contourNormals[j]) > -0.5) continue;
+                
+                // look for division
+                
+                // what about the intensity profile between v1 and v2?
+                // ROI2DLine line = new ROI2DLine(points.get(i).x, points.get(i).y,
+                // points.get(j).x, points.get(j).y);
+                // int[] linePoints = line.getBooleanMask(true).getPointsAsIntArray();
+                
+                // are points sufficiently close?
+                // => use the bounding radius / 2
+                if (distQ < divisionDistQ)
                 {
-                    // self-intersection always involves opposite normals
-                    if (n_i.dot(contourNormals[j]) > -0.5) continue;
-                    
-                    // look for division
-                    
-                    // what about the intensity profile between v1 and v2?
-                    // ROI2DLine line = new ROI2DLine(points.get(i).x, points.get(i).y,
-                    // points.get(j).x, points.get(j).y);
-                    // int[] linePoints = line.getBooleanMask(true).getPointsAsIntArray();
-                    
-                    // are points sufficiently close?
-                    // => use the bounding radius / 2
-                    if (distQ < divisionDistQ)
+                    // are points located "in front" of each other?
+                    // j - i ~= n/2 ?
+                    // take a loose guess (+/- n/7)
+                    if ((j - i) > (2 * n / 5) && (j - i) < (3 * n / 5))
                     {
-                        // are points located "in front" of each other?
-                        // j - i ~= n/2 ?
-                        // take a loose guess (+/- n/7)
-                        if ((j - i) > (2 * n / 5) && (j - i) < (3 * n / 5))
-                        {
-                            // check the local curvature on each side (4 points away)
-                            
-                            Vector3d vi1 = new Vector3d(points.get((i + n - 4) % n));
-                            Vector3d vi2 = new Vector3d(points.get((i + 4) % n));
-                            vi1.sub(p_i);
-                            vi2.sub(p_i);
-                            vi1.normalize();
-                            vi2.normalize();
-                            vi1.cross(vi1, vi2);
-                            // discard small of positive curvatures (i.e. z < 0)
-                            if (vi1.z < 0.05) continue;
-                            
-                            double vi_lQ = vi1.lengthSquared();
-                            // System.out.println(vi1.lengthSquared());
-                            Vector3d vj1 = new Vector3d(points.get((j + n - 4) % n));
-                            Vector3d vj2 = new Vector3d(points.get((j + 4) % n));
-                            vj1.sub(p_j);
-                            vj2.sub(p_j);
-                            vj1.normalize();
-                            vj2.normalize();
-                            vj1.cross(vj1, vj2);
-                            
-                            // discard small of positive curvatures (i.e. z < 0)
-                            if (vj1.z < 0.05) continue;
-                            
-                            double vj_lQ = vj1.lengthSquared();
-                            // System.out.println(vj1.lengthSquared());
-                            
-                            // curvature has to be at a relative minimum
-                            if (vi_lQ < 0.5 && vj_lQ < 0.5) continue;
-                            
-                            // System.out.println(vi_lQ + " | " + vj_lQ);
-                            
-                            // a real self-intersection is happening
-                            selfIntersection = true;
-                            break loop;
-                        }
+                        // check the local curvature on each side (4 points away)
+                        
+                        Vector3d vi1 = new Vector3d(points.get((i + n - 4) % n));
+                        Vector3d vi2 = new Vector3d(points.get((i + 4) % n));
+                        vi1.sub(p_i);
+                        vi2.sub(p_i);
+                        vi1.normalize();
+                        vi2.normalize();
+                        vi1.cross(vi1, vi2);
+                        // discard small of positive curvatures (i.e. z < 0)
+                        if (vi1.z < 0.05) continue;
+                        
+                        double vi_lQ = vi1.lengthSquared();
+                        // System.out.println(vi1.lengthSquared());
+                        Vector3d vj1 = new Vector3d(points.get((j + n - 4) % n));
+                        Vector3d vj2 = new Vector3d(points.get((j + 4) % n));
+                        vj1.sub(p_j);
+                        vj2.sub(p_j);
+                        vj1.normalize();
+                        vj2.normalize();
+                        vj1.cross(vj1, vj2);
+                        
+                        // discard small of positive curvatures (i.e. z < 0)
+                        if (vj1.z < 0.05) continue;
+                        
+                        double vj_lQ = vj1.lengthSquared();
+                        // System.out.println(vj1.lengthSquared());
+                        
+                        // curvature has to be at a relative minimum
+                        if (vi_lQ < 0.5 && vj_lQ < 0.5) continue;
+                        
+                        // System.out.println(vi_lQ + " | " + vj_lQ);
+                        
+                        // a real self-intersection is happening
+                        selfIntersection = true;
+                        break loop;
                     }
                 }
                 
@@ -451,26 +452,22 @@ public class Polygon2D extends ActiveContour
             // keep both then...
             return new Polygon2D[] { child1, child2 };
         }
-        else
+        
+        // loop => keep only the contour with correct orientation
+        // => the contour with a positive algebraic area
+        
+        if (child1.getAlgebraicInterior() < 0)
         {
-            // loop => keep only the contour with correct orientation
-            // => the contour with a positive algebraic area
-            
-            if (child1.getAlgebraicInterior() < 0)
-            {
-                // c1 is the outer loop => keep it
-                points.clear();
-                points.addAll(child1.points);
-                return null;
-            }
-            else
-            {
-                // c1 is the inner loop => keep c2
-                points.clear();
-                points.addAll(child2.points);
-                return null;
-            }
+            // c1 is the outer loop => keep it
+            points.clear();
+            points.addAll(child1.points);
+            return null;
         }
+        
+        // c1 is the inner loop => keep c2
+        points.clear();
+        points.addAll(child2.points);
+        return null;
     }
     
     @Override
@@ -552,10 +549,10 @@ public class Polygon2D extends ActiveContour
         
         for (int i = 0; i < n; i++)
         {
-            Vector3d f = modelForces[i];
+            Vector3d force = modelForces[i];
             
-            f.x += weight * contourNormals[i].x;
-            f.y += weight * contourNormals[i].y;
+            force.x += weight * contourNormals[i].x;
+            force.y += weight * contourNormals[i].y;
         }
     }
     
@@ -579,7 +576,7 @@ public class Polygon2D extends ActiveContour
         for (int i = 0; i < n; i++)
         {
             Point3d p = points.get(i);
-            Vector3d f = modelForces[i];
+            Vector3d force = modelForces[i];
             
             // compute the gradient (2nd order)
             double nextX = getPixelValue(data, width, height, p.x + 0.5, p.y);
@@ -594,12 +591,12 @@ public class Polygon2D extends ActiveContour
             
             grad.scale(weight);
             
-            f.add(grad);
+            force.add(grad);
         }
     }
     
     @Override
-    void computeRegionForces(Sequence imageData, int channel, double weight, double sensitivity, double cin, double cout)
+    void computeRegionForces(Sequence imageData, int channel, double weight, double sensitivity, double inAvg, double outAvg)
     {
         // sensitivity should be high for dim objects, low for bright objects...
         // ... but none of the following options work properly
@@ -609,7 +606,7 @@ public class Polygon2D extends ActiveContour
         // sensitivity = sensitivity / (Math.log10(cin / cout));
         
         Point3d p;
-        Vector3d f, norm, cvms = new Vector3d();
+        Vector3d force, norm, cvms = new Vector3d();
         double val, inDiff, outDiff, forceFactor;
         int n = points.size();
         
@@ -625,7 +622,7 @@ public class Polygon2D extends ActiveContour
         for (int i = 0; i < n; i++)
         {
             p = points.get(i);
-            f = modelForces[i];
+            force = modelForces[i];
             norm = contourNormals[i];
             
             // bounds check
@@ -633,17 +630,17 @@ public class Polygon2D extends ActiveContour
             
             val = getPixelValue(_data, width, height, p.x, p.y);
             
-            inDiff = val - cin;
+            inDiff = val - inAvg;
             inDiff *= inDiff;
             
-            outDiff = val - cout;
+            outDiff = val - outAvg;
             outDiff *= outDiff;
             
             forceFactor = weight * (sensitivity * outDiff) - (inDiff / sensitivity);
             
             cvms.scale(counterClockWise ? -forceFactor : forceFactor, norm);
             
-            f.add(cvms);
+            force.add(cvms);
         }
         
     }
@@ -657,7 +654,7 @@ public class Polygon2D extends ActiveContour
         
         if (n < 3) return;
         
-        Vector3d f;
+        Vector3d force;
         Point3d prev, curr, next;
         
         weight /= sampling.getValue();
@@ -667,31 +664,31 @@ public class Polygon2D extends ActiveContour
         curr = points.get(0);
         next = points.get(1);
         
-        f = feedbackForces[0];
+        force = feedbackForces[0];
         
-        f.x += weight * (prev.x - 2 * curr.x + next.x);
-        f.y += weight * (prev.y - 2 * curr.y + next.y);
+        force.x += weight * (prev.x - 2 * curr.x + next.x);
+        force.y += weight * (prev.y - 2 * curr.y + next.y);
         
         // middle points
         for (int i = 1; i < n - 1; i++)
         {
-            f = feedbackForces[i];
+            force = feedbackForces[i];
             prev = points.get(i - 1);
             curr = points.get(i);
             next = points.get(i + 1);
             
-            f.x += weight * (prev.x - 2 * curr.x + next.x);
-            f.y += weight * (prev.y - 2 * curr.y + next.y);
+            force.x += weight * (prev.x - 2 * curr.x + next.x);
+            force.y += weight * (prev.y - 2 * curr.y + next.y);
         }
         
         // last point
-        f = feedbackForces[n - 1];
+        force = feedbackForces[n - 1];
         prev = points.get(n - 2);
         curr = points.get(n - 1);
         next = points.get(0);
         
-        f.x += weight * (prev.x - 2 * curr.x + next.x);
-        f.y += weight * (prev.y - 2 * curr.y + next.y);
+        force.x += weight * (prev.x - 2 * curr.x + next.x);
+        force.y += weight * (prev.y - 2 * curr.y + next.y);
     }
     
     void computeVolumeConstraint(double targetVolume)
@@ -704,7 +701,7 @@ public class Polygon2D extends ActiveContour
         int n = points.size();
         
         Vector3d avgFeedback = new Vector3d();
-        int cpt = 0;
+        int nbFeedbackForces = 0;
         
         for (int i = 0; i < n; i++)
         {
@@ -730,13 +727,13 @@ public class Polygon2D extends ActiveContour
             if (forceNorm > 0 && volumeDiff < 0)
             {
                 avgFeedback.add(feedbackForces[i]);
-                cpt++;
+                nbFeedbackForces++;
             }
         }
         
         if (avgFeedback.length() > 0)
         {
-            avgFeedback.scale(1.0 / cpt);
+            avgFeedback.scale(1.0 / nbFeedbackForces);
             avgFeedback.scale(Math.abs(volumeDiff / targetVolume) / 0.5);
             
             // move the entire mesh (ugly, but amazingly efficient!!)
@@ -889,7 +886,7 @@ public class Polygon2D extends ActiveContour
      *            the Y-coordinate of the point
      * @return the interpolated image value at the given coordinates
      */
-    private float getPixelValue(float[] data, int width, int height, double x, double y)
+    private static float getPixelValue(float[] data, int width, int height, double x, double y)
     {
         // "center" the coordinates to the center of the pixel
         x -= 0.5;
@@ -1189,7 +1186,7 @@ public class Polygon2D extends ActiveContour
             contourNormals = new Vector3d[n];
             for (int i = 0; i < n; i++)
                 contourNormals[i] = new Vector3d();
-                
+            
             updateNormals();
         }
         
@@ -1202,8 +1199,18 @@ public class Polygon2D extends ActiveContour
         n = points.size();
         boolean noChange = false;
         
+        int iterCount = 0;
+        int maxIter = n * 10;
+        
         while (noChange == false)
         {
+            // Safeguard
+            if (++iterCount > maxIter)
+            {
+                System.err.println("[Active Contours] Warning: hitting safeguard (preventing infinite resampling)");
+                break;
+            }
+            
             noChange = true;
             
             // all points but the last
@@ -1293,7 +1300,7 @@ public class Polygon2D extends ActiveContour
         java.util.Arrays.fill(mask, 0, bounds.width - 1, false);
         for (int o = 0; o < mask.length; o += bounds.width)
             mask[o] = false;
-            
+        
         for (int j = 0; j < bounds.height; j += grid)
             for (int i = 0, index = j * bounds.width; i < bounds.width; i += grid, index += grid)
             {
@@ -1354,7 +1361,7 @@ public class Polygon2D extends ActiveContour
                     }
                 }
                 else // a = b -> horizontal edge only if c is different
-                    if (a != c)
+                if (a != c)
                 {
                     if (a == false) // a,b are outside
                     {
@@ -1402,7 +1409,7 @@ public class Polygon2D extends ActiveContour
                     }
                 }
                 else // c = d -> horizontal edge only if b is different
-                    if (b != c)
+                if (b != c)
                 {
                     if (b == false) // c,d are inside
                     {
@@ -1417,7 +1424,7 @@ public class Polygon2D extends ActiveContour
                     }
                 }
             }
-            
+        
         if (segments.size() == 0) return;
         
         for (Point3d p : segments.get(0))
@@ -1471,6 +1478,15 @@ public class Polygon2D extends ActiveContour
     @Override
     protected void updateMetaData()
     {
+        // int n = points.size();
+        // if (modelForces == null || modelForces.length != n) modelForces = new Vector3d[n];
+        // if (contourNormals == null || contourNormals.length != n) contourNormals = new
+        // Vector3d[n];
+        // if (feedbackForces == null || feedbackForces.length != n) feedbackForces = new
+        // Vector3d[n];
+        // if (volumeConstraintForces == null || volumeConstraintForces.length != n)
+        // volumeConstraintForces = new Vector3d[n];
+        
         super.updateMetaData();
         updatePath();
     }
@@ -1497,6 +1513,8 @@ public class Polygon2D extends ActiveContour
         this.path = newPath;
     }
     
+    @SuppressWarnings("deprecation")
+    @Deprecated
     @Override
     public ROI2D toROI()
     {
@@ -1514,14 +1532,14 @@ public class Polygon2D extends ActiveContour
             roi = new ROI2DArea();
             ((ROI2DArea) roi).addShape(path);
             break;
-            
+        
         case POLYGON:
             List<Point2D> p2d = new ArrayList<Point2D>(points.size());
             for (Point3d p : this)
                 p2d.add(new Point2D.Double(p.x, p.y));
             roi = new ROI2DPolygon(p2d);
             break;
-            
+        
         default:
             throw new IllegalArgumentException("ROI of type " + type + " cannot be exported yet");
         }
@@ -1644,7 +1662,7 @@ public class Polygon2D extends ActiveContour
     public void toSequence(Sequence output, double value)
     {
         int myZ = (int) Math.round(getZ());
-        int myT = (int) Math.round(getT());
+        int myT = Math.round(getT());
         
         Object _mask = output.getDataXY(myT, myZ, 0);
         
@@ -1768,6 +1786,45 @@ public class Polygon2D extends ActiveContour
      */
     public void rasterScan(final boolean updateLocalMask, final Sequence imageData, VarDouble averageIntensity, final BooleanMask3D imageMask)
     {
+        
+    }
     
+    @Override
+    public boolean loadFromXML(Node node)
+    {
+        if (!super.loadFromXML(node)) return false;
+        
+        Element xmlElement = XMLUtil.getElement(node, "Contour");
+        
+        if (xmlElement == null) return false;
+        
+        for (Element ptElem : XMLUtil.getElements(xmlElement))
+        {
+            double xPt = XMLUtil.getAttributeDoubleValue(ptElem, "x", Double.NaN);
+            double yPt = XMLUtil.getAttributeDoubleValue(ptElem, "y", Double.NaN);
+            if (Double.isNaN(xPt) || Double.isNaN(yPt)) return false;
+            points.add(new Point3d(xPt, yPt, 0));
+        }
+        
+        updatePath();
+        
+        return true;
+    }
+    
+    @Override
+    public boolean saveToXML(Node node)
+    {
+        if (!super.saveToXML(node)) return false;
+        
+        Element xmlElement = XMLUtil.addElement(node, "Contour");
+        
+        for (Point3d pt : points)
+        {
+            Element xmlPt = XMLUtil.addElement(xmlElement, "Point");
+            XMLUtil.setAttributeDoubleValue(xmlPt, "x", pt.x);
+            XMLUtil.setAttributeDoubleValue(xmlPt, "y", pt.y);
+        }
+        
+        return true;
     }
 }
