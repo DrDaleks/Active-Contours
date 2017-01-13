@@ -97,21 +97,19 @@ public class Polygon2D extends ActiveContour
     
     private final FillHolesInROI holeFiller = new FillHolesInROI();
     
-    final ArrayList<Point3d>     points     = new ArrayList<Point3d>();
+    final ArrayList<Point3d> points = new ArrayList<Point3d>();
     
-    Path2D.Double                path       = new Path2D.Double();
+    Path2D.Double path = new Path2D.Double();
     
-    double                       cout       = 0.0;
+    double cout = 0.0;
     
-    private Vector3d[]           modelForces;
+    private Vector3d[] modelForces;
     
-    private Vector3d[]           contourNormals;
+    private Vector3d[] contourNormals;
     
-    private Vector3d[]           feedbackForces;
+    private Vector3d[] feedbackForces;
     
-    private Vector3d[]           volumeConstraintForces;
-    
-    private boolean              counterClockWise;
+    private Vector3d[] volumeConstraintForces;
     
     /**
      * For XML loading purposes only
@@ -156,7 +154,7 @@ public class Polygon2D extends ActiveContour
         }
         
         updateMetaData();
-        counterClockWise = contour.counterClockWise;
+        //counterClockWise = contour.counterClockWise;
     }
     
     public Polygon2D(Var<Double> sampling, SlidingWindow convergenceWindow, ROI2D roi)
@@ -234,7 +232,12 @@ public class Polygon2D extends ActiveContour
         // points.clear();
         // }
         
-        counterClockWise = (getAlgebraicInterior() > 0);
+        if (getAlgebraicInterior() > 0)
+        {
+            // Contour is defined in counter-clockwise order
+            // => inverse it to clockwise ordering
+            Collections.reverse(points);
+        }
         
         try
         {
@@ -638,7 +641,7 @@ public class Polygon2D extends ActiveContour
             
             forceFactor = weight * (sensitivity * outDiff) - (inDiff / sensitivity);
             
-            cvms.scale(counterClockWise ? -forceFactor : forceFactor, norm);
+            cvms.scale(forceFactor, norm);
             
             force.add(cvms);
         }
@@ -954,37 +957,37 @@ public class Polygon2D extends ActiveContour
         
         switch (order)
         {
-        
-        case 0: // number of points
-        {
-            return points.size();
-        }
-        
-        case 1: // perimeter
-        {
-            int size = points.size();
             
-            Point3d p1 = points.get(size - 1);
-            Point3d p2 = points.get(0);
-            
-            double perimeter = p1.distance(p2);
-            
-            for (int i = 0; i < size - 1; i++)
+            case 0: // number of points
             {
-                // shift pair of points by one index
-                p1 = p2;
-                p2 = points.get(i + 1);
-                perimeter += p1.distance(p2);
+                return points.size();
             }
             
-            return perimeter;
-        }
-        case 2: // area
-        {
-            return Math.abs(getAlgebraicInterior());
-        }
-        default:
-            throw new UnsupportedOperationException("Dimension " + order + " not implemented");
+            case 1: // perimeter
+            {
+                int size = points.size();
+                
+                Point3d p1 = points.get(size - 1);
+                Point3d p2 = points.get(0);
+                
+                double perimeter = p1.distance(p2);
+                
+                for (int i = 0; i < size - 1; i++)
+                {
+                    // shift pair of points by one index
+                    p1 = p2;
+                    p2 = points.get(i + 1);
+                    perimeter += p1.distance(p2);
+                }
+                
+                return perimeter;
+            }
+            case 2: // area
+            {
+                return Math.abs(getAlgebraicInterior());
+            }
+            default:
+                throw new UnsupportedOperationException("Dimension " + order + " not implemented");
         }
     }
     
@@ -1528,20 +1531,20 @@ public class Polygon2D extends ActiveContour
         
         switch (type)
         {
-        case AREA:
-            roi = new ROI2DArea();
-            ((ROI2DArea) roi).addShape(path);
+            case AREA:
+                roi = new ROI2DArea();
+                ((ROI2DArea) roi).addShape(path);
             break;
-        
-        case POLYGON:
-            List<Point2D> p2d = new ArrayList<Point2D>(points.size());
-            for (Point3d p : this)
-                p2d.add(new Point2D.Double(p.x, p.y));
-            roi = new ROI2DPolygon(p2d);
+            
+            case POLYGON:
+                List<Point2D> p2d = new ArrayList<Point2D>(points.size());
+                for (Point3d p : this)
+                    p2d.add(new Point2D.Double(p.x, p.y));
+                roi = new ROI2DPolygon(p2d);
             break;
-        
-        default:
-            throw new IllegalArgumentException("ROI of type " + type + " cannot be exported yet");
+            
+            default:
+                throw new IllegalArgumentException("ROI of type " + type + " cannot be exported yet");
         }
         
         roi.setT(t);
@@ -1578,16 +1581,23 @@ public class Polygon2D extends ActiveContour
         for (int j = minY; j < maxY; j++)
         {
             crosses.clear();
-            for (int p = 0; p < n - 1; p++)
-            {
-                p1 = points.get(p);
-                p2 = points.get(p + 1);
-                
-                if (j > Math.min(p1.y, p2.y) && j < Math.max(p1.y, p2.y)) crosses.add((int) Math.round((p1.x + p2.x) * 0.5));
-            }
-            p1 = points.get(0);
             
-            if (j > Math.min(p1.y, p2.y) && j < Math.max(p1.y, p2.y)) crosses.add((int) Math.round((p1.x + p2.x) * 0.5));
+            p1 = points.get(n - 1);
+            
+            for (int p = 0; p < n; p++)
+            {
+                p2 = points.get(p);
+                
+                if (j > Math.min(p1.y, p2.y) && j < Math.max(p1.y, p2.y))
+                {
+                    int cross = (int) Math.round((p1.x + p2.x) * 0.5);
+                    if (cross < 0) cross = 0;
+                    else if (cross >= w) cross = w - 1;
+                    crosses.add(cross);
+                }
+                
+                p1 = p2;
+            }
             
             if (crosses.size() == 0 || crosses.size() % 2 == 1) continue;
             
