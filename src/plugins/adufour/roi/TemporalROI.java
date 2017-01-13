@@ -33,7 +33,7 @@ public class TemporalROI<R extends ROI> extends ROI implements ROIListener, Over
     
     protected final TreeMap<Integer, R> slices                 = new TreeMap<Integer, R>();
     
-    private int                         c;
+    private int                         channel;
     
     protected boolean                   useChildColor;
     protected Semaphore                 modifyingSlice;
@@ -271,7 +271,7 @@ public class TemporalROI<R extends ROI> extends ROI implements ROIListener, Over
     
     public int getC()
     {
-        return c;
+        return channel;
     }
     
     public void setC(int value)
@@ -279,7 +279,7 @@ public class TemporalROI<R extends ROI> extends ROI implements ROIListener, Over
         beginUpdate();
         try
         {
-            this.c = value;
+            this.channel = value;
             
             modifyingSlice.acquireUninterruptibly();
             
@@ -367,7 +367,7 @@ public class TemporalROI<R extends ROI> extends ROI implements ROIListener, Over
         slices.put(Integer.valueOf(t), slice);
         
         // notify ROI changed
-        roiChanged();
+        roiChanged(true);
     }
     
     /**
@@ -446,7 +446,7 @@ public class TemporalROI<R extends ROI> extends ROI implements ROIListener, Over
         }
         
         // notify ROI changed
-        roiChanged();
+        roiChanged(true);
         
         return result;
     }
@@ -569,7 +569,7 @@ public class TemporalROI<R extends ROI> extends ROI implements ROIListener, Over
         switch (event.getType())
         {
         case ROI_CHANGED:
-            roiChanged();
+            roiChanged(true);
             break;
         
         case FOCUS_CHANGED:

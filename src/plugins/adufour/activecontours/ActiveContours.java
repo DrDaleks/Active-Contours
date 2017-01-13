@@ -38,6 +38,7 @@ import icy.system.SystemUtil;
 import icy.system.thread.Processor;
 import icy.system.thread.ThreadUtil;
 import icy.type.DataType;
+import icy.type.point.Point3D;
 import icy.type.rectangle.Rectangle3D;
 import icy.util.OMEUtil;
 import icy.util.ShapeUtil.BooleanOperator;
@@ -45,7 +46,6 @@ import icy.util.StringUtil;
 import plugins.adufour.activecontours.SlidingWindow.Operation;
 import plugins.adufour.blocks.lang.Block;
 import plugins.adufour.blocks.util.VarList;
-import plugins.adufour.connectedcomponents.ConnectedComponent;
 import plugins.adufour.ezplug.EzButton;
 import plugins.adufour.ezplug.EzException;
 import plugins.adufour.ezplug.EzGroup;
@@ -61,6 +61,7 @@ import plugins.adufour.ezplug.EzVarListener;
 import plugins.adufour.ezplug.EzVarSequence;
 import plugins.adufour.filtering.Convolution1D;
 import plugins.adufour.filtering.ConvolutionException;
+import plugins.adufour.filtering.GaussianFilter;
 import plugins.adufour.filtering.Kernels1D;
 import plugins.adufour.hierarchicalkmeans.HKMeans;
 import plugins.adufour.roi.TemporalROI;
@@ -73,6 +74,7 @@ import plugins.fab.trackmanager.TrackGroup;
 import plugins.fab.trackmanager.TrackManager;
 import plugins.fab.trackmanager.TrackSegment;
 import plugins.kernel.canvas.VtkCanvas;
+import plugins.kernel.roi.descriptor.measure.ROIMassCenterDescriptorsPlugin;
 import plugins.kernel.roi.roi2d.ROI2DArea;
 import plugins.kernel.roi.roi2d.ROI2DPolygon;
 import plugins.kernel.roi.roi2d.ROI2DRectangle;
@@ -401,27 +403,25 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             // store detections and results
             storeResult(t);
             
-            if (tracking_newObjects.getValue())
+            if (tracking_newObjects.getValue() && inputData.getSizeZ() == 1)
             {
-                // watch for new objects in the field
+                // watch for new objects in the field (2D only)
                 
-                ArrayList<ConnectedComponent> newObjects = new ArrayList<ConnectedComponent>();
+                ArrayList<ROI2D> newObjects = new ArrayList<ROI2D>();
                 
-                try
+                double vol = 0;
+                for (Double volume : volumes.values())
+                    vol += volume;
+                vol /= volumes.values().size();
+                
+                int minVol = (int) (vol / 10);
+                int maxVol = (int) vol;
+                
+                Sequence currentT = SequenceUtil.extractFrame(inputData, t);
+                Sequence filtered = GaussianFilter.filter(currentT, 4.0, 4.0, 0.0);
+                for (ROI roi : HKMeans.hKMeans(filtered, (byte) 10, minVol, maxVol, 0.0))
                 {
-                    // get the average contour volume to find new ones
-                    
-                    double vol = 0;
-                    for (Double volume : volumes.values())
-                        vol += volume;
-                    vol /= volumes.values().size();
-                    
-                    Sequence currentT = SequenceUtil.extractFrame(inputData, t);
-                    newObjects.addAll(HKMeans.hKMeans(currentT, 4.0, 10, (int) vol / 10, (int) vol, 0.0, null));
-                }
-                catch (ConvolutionException e)
-                {
-                    // never mind
+                    newObjects.add((ROI2D) roi);
                 }
                 
                 // 1) discard objects overlapping with existing contours
@@ -436,53 +436,49 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                     // remove any "new object" at that location"
                     for (int i = 0; i < newObjects.size(); i++)
                     {
-                        Point3d center = newObjects.get(i).getMassCenter();
+                        Point3D center = ROIMassCenterDescriptorsPlugin.computeMassCenter(newObjects.get(i)).toPoint3D();
                         
-                        if (previousContour.getDistanceToEdge(center) > 0) newObjects.remove(i--);
+                        if (previousContour.getDistanceToEdge(new Point3d(center.getX(), center.getY(), center.getZ())) > 0) newObjects.remove(i--);
                     }
                 }
                 
-                // add new objects (2D only)
-                if (inputData.getSizeZ() == 1)
+                for (ROI2D newROI : newObjects)
                 {
-                    for (ConnectedComponent cc : newObjects)
-                    {
-                        ROI2DArea roi = new ROI2DArea((ROI2DArea) cc.toROI());
-                        roi.setZ(0);
-                        ActiveContour contour = new Polygon2D(contour_resolution.getVariable(), new SlidingWindow(convergence_winSize.getValue()), roi);
-                        contour.setDivisionSensitivity(division_sensitivity.getVariable());
-                        contour.setT(t);
-                        
-                        TrackSegment segment = null;
-                        // does it overlap with a track that terminates in the previous frame?
-                        synchronized (trackGroup)
-                        {
-                            for (TrackSegment track : trackGroup.getValue().getTrackSegmentList())
-                            {
-                                ActiveContour trackEnd = (ActiveContour) track.getLastDetection();
-                                if (trackEnd == null) System.err.println("null");
-                                else if (trackEnd.getT() == (t - 1) && trackEnd.boundingBox.intersect(contour.boundingBox))
-                                {
-                                    System.out.println("found link at time " + t + ", position (" + contour.getX() + ";" + contour.getY() + ")");
-                                    segment = track;
-                                    break;
-                                }
-                            }
-                            
-                            if (segment == null)
-                            { // no candidate contour found
-                                segment = new TrackSegment();
-                                trackGroup.getValue().addTrackSegment(segment);
-                                region_cin.put(segment, 0.0);
-                                region_cout.put(segment, 0.0);
-                            }
-                            
-                            segment.addDetection(contour);
-                        }
-                    }
+                    ROI2DArea roi = new ROI2DArea(newROI.getBooleanMask(true));
+                    roi.setZ(0);
+                    ActiveContour contour = new Polygon2D(contour_resolution.getVariable(), new SlidingWindow(convergence_winSize.getValue()), roi);
+                    contour.setDivisionSensitivity(division_sensitivity.getVariable());
+                    contour.setT(t);
                     
-                    evolveContours(t);
+                    TrackSegment segment = null;
+                    // does it overlap with a track that terminates in the previous frame?
+                    synchronized (trackGroup)
+                    {
+                        for (TrackSegment track : trackGroup.getValue().getTrackSegmentList())
+                        {
+                            ActiveContour trackEnd = (ActiveContour) track.getLastDetection();
+                            if (trackEnd == null) System.err.println("null");
+                            else if (trackEnd.getT() == (t - 1) && trackEnd.boundingBox.intersect(contour.boundingBox))
+                            {
+                                System.out.println("found link at time " + t + ", position (" + contour.getX() + ";" + contour.getY() + ")");
+                                segment = track;
+                                break;
+                            }
+                        }
+                        
+                        if (segment == null)
+                        { // no candidate contour found
+                            segment = new TrackSegment();
+                            trackGroup.getValue().addTrackSegment(segment);
+                            region_cin.put(segment, 0.0);
+                            region_cout.put(segment, 0.0);
+                        }
+                        
+                        segment.addDetection(contour);
+                    }
                 }
+                
+                evolveContours(t);
             }
             
             if (Thread.currentThread().isInterrupted()) break;
@@ -676,40 +672,43 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             roiInput.setValue(roiFromSequence.toArray(new ROI[roiFromSequence.size()]));
         }
         
-        ArrayList<Future<?>> tasks = new ArrayList<Future<?>>(roiInput.getValue().length);
+        ArrayList<Callable<Object>> tasks = new ArrayList<Callable<Object>>(roiInput.getValue().length);
         
-        for (ROI roi : roiInput.getValue())
+        for (final ROI roi : roiInput.getValue())
         {
-            if (roi instanceof ROI2D)
+            Callable<Object> task = new Callable<Object>()
             {
-                final ROI2D roi2d = (ROI2D) roi.getCopy();
                 
-                if (roi2d.getZ() == -1)
+                /** @return nothing */
+                public Object call()
                 {
-                    // a 2D contour cannot be created from a "virtually 3D" ROI,
-                    // merely a slice of it => which one?
-                    if (getUI() != null)
+                    
+                    if (roi instanceof ROI2D)
                     {
-                        int currentVisibleSlice = inputData.getFirstViewer().getPositionZ();
+                        final ROI2D roi2d = (ROI2D) roi.getCopy();
                         
-                        if (currentVisibleSlice == -1) throw new EzException(this, "Please select a 2D slice (using a 2D viewer) where the contour should operate", true);
-                        
-                        roi2d.setZ(currentVisibleSlice);
-                    }
-                    else
-                    {
-                        if (depth > 1)
+                        if (roi2d.getZ() == -1)
                         {
-                            System.err.println("WARNING: cannot create a 2D contour from a ROI of infinite Z dimension, will use Z=0");
+                            // a 2D contour cannot be created from a "virtually 3D" ROI,
+                            // merely a slice of it => which one?
+                            if (getUI() != null)
+                            {
+                                int currentVisibleSlice = inputData.getFirstViewer().getPositionZ();
+                                
+                                if (currentVisibleSlice == -1) throw new EzException(ActiveContours.this, "Please select a 2D slice (using a 2D viewer) where the contour should operate", true);
+                                
+                                roi2d.setZ(currentVisibleSlice);
+                            }
+                            else
+                            {
+                                if (depth > 1)
+                                {
+                                    System.err.println("WARNING: cannot create a 2D contour from a ROI of infinite Z dimension, will use Z=0");
+                                }
+                                roi2d.setZ(0);
+                            }
                         }
-                        roi2d.setZ(0);
-                    }
-                }
-                
-                Runnable initializer = new Runnable()
-                {
-                    public void run()
-                    {
+                        
                         if (roi2d instanceof ROI2DArea)
                         {
                             // special case: check if the area has multiple components => split them
@@ -765,19 +764,11 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                             }
                         }
                     }
-                };
-                
-                tasks.add(multiThreadService.submit(initializer));
-            }
-            else if (roi instanceof ROI3D)
-            {
-                final ROI3D r3 = (ROI3D) roi;
-                final Tuple3d pixelSize = new Point3d(inputData.getPixelSizeX(), inputData.getPixelSizeY(), inputData.getPixelSizeZ());
-                
-                Runnable initializer = new Runnable()
-                {
-                    public void run()
+                    else if (roi instanceof ROI3D)
                     {
+                        final ROI3D r3 = (ROI3D) roi;
+                        final Tuple3d pixelSize = new Point3d(inputData.getPixelSizeX(), inputData.getPixelSizeY(), inputData.getPixelSizeZ());
+                        
                         final SlidingWindow window = new SlidingWindow(convergence_winSize.getValue());
                         final ActiveContour contour = new Mesh3D(contour_resolution.getVariable(), pixelSize, r3, window);
                         // contour.setX(r3.getBounds3D().getCenterX());
@@ -801,26 +792,42 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                             region_cout.put(segment, 0.0);
                         }
                     }
-                };
-                
-                tasks.add(multiThreadService.submit(initializer));
-            }
+                    
+                    // no need to return anything
+                    return null;
+                }
+            };
+            
+            tasks.add(task);// multiThreadService.submit(task));
         }
         
-        try
-        {
-            for (Future<?> future : tasks)
-                future.get();
-        }
-        catch (InterruptedException e)
-        {
-            // restore the interrupted flag
-            Thread.currentThread().interrupt();
-        }
-        catch (Exception e)
-        {
-            if (e.getCause() instanceof EzException) throw (EzException) e.getCause();
-            e.printStackTrace();
+        
+//        try
+//        {
+//            for (Future<Object> future : multiThreadService.invokeAll(tasks))
+//                // for (Future<?> future : tasks)
+//                future.get();
+//        }
+//        catch (InterruptedException e)
+//        {
+//            // restore the interrupted flag
+//            Thread.currentThread().interrupt();
+//        }
+//        catch (Exception e)
+//        {
+//            if (e.getCause() instanceof EzException) throw (EzException) e.getCause();
+//            e.printStackTrace();
+//        }
+        
+        for(Callable<?> task : tasks){
+            try
+            {
+                task.call();
+            }
+            catch (Exception e)
+            {
+                System.err.println("Error while initialising a contour (moving on...)");
+            }
         }
     }
     
@@ -882,6 +889,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             {
                 if (contour.hasConverged(convergence_operation.getValue(), convergence_criterion.getValue()))
                 {
+                    // System.out.println(contour.getDimension(0));
                     nbConvergedContours++;
                     continue;
                 }
@@ -1026,11 +1034,14 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             
             for (final ActiveContour contour : evolvingContoursAtTimeT)
             {
+                final TrackSegment segment = trackGroup.getValue().getTrackSegmentWithDetection(contour);
+                
+                if (!region_cin.containsKey(segment) && region_weight.getValue() > EPSILON) updateRegionStatistics();
+                
                 tasks.add(new Callable<ActiveContour>()
                 {
                     public ActiveContour call()
                     {
-                        TrackSegment segment = trackGroup.getValue().getTrackSegmentWithDetection(contour);
                         
                         if (regul_weight.getValue() > EPSILON)
                         {
@@ -1514,6 +1525,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         inputMap.add("type of ROI output", output_roiType.getVariable());
         inputMap.add("tracking", tracking.getVariable());
         inputMap.add("division sensitivity", division_sensitivity.getVariable());
+        inputMap.add("axis constraint", axis_weight.getVariable());
         inputMap.add("volume constraint", volume_constraint.getVariable());
         inputMap.add("watch entering objects", tracking_newObjects.getVariable());
     }

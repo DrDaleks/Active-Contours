@@ -227,6 +227,7 @@ public abstract class ActiveContour extends Detection implements Iterable<Point3
      * @return a ROI representing the contour
      * @deprecated use {@link #toROI(ROIType)} instead
      */
+    @Deprecated
     public abstract ROI toROI();
     
     /**

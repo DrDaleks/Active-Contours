@@ -435,7 +435,7 @@ public class Mesh3D extends ActiveContour
      *            the Z-coordinate of the point
      * @return the interpolated image value at the given coordinates
      */
-    private float getPixelValue(Sequence data, double x, double y, double z)
+    private static float getPixelValue(Sequence data, double x, double y, double z)
     {
         // "center" the coordinates to the center of the pixel
         x -= 0.5;
@@ -632,7 +632,7 @@ public class Mesh3D extends ActiveContour
     {
         super.updateMetaData();
         
-        mesh.roiChanged();
+        mesh.roiChanged(true);
     }
     
     @Override
@@ -735,10 +735,10 @@ public class Mesh3D extends ActiveContour
         int maxX = Math.min(b3.sizeX, (int) Math.round(max.x + xExtent / 2));
         
         double outSum = 0, outCpt = 0;
-        for (int z = minZ; z < maxZ; z++)
+        for (int zSlice = minZ; zSlice < maxZ; zSlice++)
         {
-            boolean[] _mask = mask.mask.get(z).mask;
-            float[] _data = imageData.getDataXYAsFloat(0, z, 0);
+            boolean[] _mask = mask.mask.get(zSlice).mask;
+            float[] _data = imageData.getDataXYAsFloat(0, zSlice, 0);
             
             for (int j = minY; j < maxY; j++)
             {
@@ -762,6 +762,7 @@ public class Mesh3D extends ActiveContour
         return mesh.getDistanceToMesh(p);
     }
     
+    @SuppressWarnings("deprecation")
     @Override
     public ROI toROI()
     {

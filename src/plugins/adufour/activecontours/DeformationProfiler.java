@@ -1,14 +1,5 @@
 package plugins.adufour.activecontours;
 
-import icy.file.FileUtil;
-import icy.gui.dialog.SaveDialog;
-import icy.gui.frame.progress.AnnounceFrame;
-import icy.gui.util.GuiUtil;
-import icy.math.ArrayMath;
-import icy.plugin.interface_.PluginBundled;
-import icy.preferences.XMLPreferences;
-import icy.util.XLSUtil;
-
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.io.File;
@@ -29,10 +20,6 @@ import javax.vecmath.Point3d;
 import javax.vecmath.SingularMatrixException;
 import javax.vecmath.Vector3d;
 
-import jxl.write.WritableSheet;
-import jxl.write.WritableWorkbook;
-import jxl.write.WriteException;
-
 import org.jfree.chart.ChartFactory;
 import org.jfree.chart.ChartPanel;
 import org.jfree.chart.JFreeChart;
@@ -42,6 +29,19 @@ import org.jfree.chart.renderer.xy.XYItemRenderer;
 import org.jfree.data.xy.XYSeries;
 import org.jfree.data.xy.XYSeriesCollection;
 
+import Jama.EigenvalueDecomposition;
+import Jama.Matrix;
+import icy.file.FileUtil;
+import icy.gui.dialog.SaveDialog;
+import icy.gui.frame.progress.AnnounceFrame;
+import icy.gui.util.GuiUtil;
+import icy.math.ArrayMath;
+import icy.plugin.interface_.PluginBundled;
+import icy.preferences.XMLPreferences;
+import icy.util.XLSUtil;
+import jxl.write.WritableSheet;
+import jxl.write.WritableWorkbook;
+import jxl.write.WriteException;
 import plugins.adufour.activecontours.ActiveContours.ROIType;
 import plugins.adufour.quickhull.QuickHull3D;
 import plugins.adufour.roi.mesh.Vertex3D;
@@ -49,8 +49,6 @@ import plugins.adufour.roi.mesh.polygon.ROI3DTriangularMesh;
 import plugins.fab.trackmanager.PluginTrackManagerProcessor;
 import plugins.fab.trackmanager.TrackSegment;
 import plugins.nchenouard.spot.Detection;
-import Jama.EigenvalueDecomposition;
-import Jama.Matrix;
 
 /**
  * WARNING: this is an experimental class and may change in the future, use at your own risks!
@@ -90,7 +88,7 @@ public class DeformationProfiler extends PluginTrackManagerProcessor implements 
         }
     }
     
-    private JComboBox jComboDescriptors = new JComboBox(Descriptors.values());
+    private JComboBox<Descriptors> jComboDescriptors = new JComboBox<Descriptors>(Descriptors.values());
     
     private JButton jButtonSaveToVTK = new JButton("Export meshes to VTK files");
     
@@ -613,7 +611,6 @@ public class DeformationProfiler extends PluginTrackManagerProcessor implements 
         
         ArrayList<Future<?>> results = new ArrayList<Future<?>>();
         
-        long i = System.nanoTime();
         for (TrackSegment ts : trackPool.getTrackSegmentList())
         {
             final int trackIndex = trackPool.getTrackIndex(ts);
@@ -690,8 +687,6 @@ public class DeformationProfiler extends PluginTrackManagerProcessor implements 
                 e.printStackTrace();
             }
         }
-        long j = System.nanoTime();
-        System.out.println("Execution time: " + (j - i) / 1000000 + "ms");
         service.shutdown();
         return result;
     }
