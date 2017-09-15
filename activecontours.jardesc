@@ -14,12 +14,12 @@
         <javaElement handleIdentifier="=Active-Contours/src&lt;plugins.adufour.activecontours{ActiveContoursOverlay.java"/>
         <javaElement handleIdentifier="=Active-Contours/src&lt;plugins.adufour.activecontours{TopologyException.java"/>
         <javaElement handleIdentifier="=Active-Contours/src&lt;plugins.adufour.activecontours{ActiveContour.java"/>
-        <javaElement handleIdentifier="=Active-Contours/src&lt;plugins.adufour.roi"/>
         <javaElement handleIdentifier="=Active-Contours/src&lt;plugins.adufour.activecontours{Mesh3D.java"/>
         <javaElement handleIdentifier="=Active-Contours/src&lt;plugins.adufour.activecontours{DeformationProfiler.java"/>
         <javaElement handleIdentifier="=Active-Contours/src&lt;plugins.adufour.activecontours{ReSampler.java"/>
         <javaElement handleIdentifier="=Active-Contours/src&lt;plugins.adufour.activecontours{ActiveContours.java"/>
         <javaElement handleIdentifier="=Active-Contours/src&lt;plugins.adufour.activecontours{Polygon2D.java"/>
         <javaElement handleIdentifier="=Active-Contours/src&lt;plugins.adufour.activecontours{SlidingWindow.java"/>
+        <javaElement handleIdentifier="=Active-Contours/src&lt;plugins.adufour.activecontours{SaveMeshTracksToVTK.java"/>
     </selectedElements>
 </jardesc>
