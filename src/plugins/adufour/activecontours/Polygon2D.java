@@ -33,6 +33,7 @@ import icy.roi.BooleanMask2D;
 import icy.roi.BooleanMask3D;
 import icy.roi.ROI;
 import icy.roi.ROI2D;
+import icy.roi.ROIUtil;
 import icy.sequence.Sequence;
 import icy.system.IcyHandledException;
 import icy.type.DataType;
@@ -1531,18 +1532,23 @@ public class Polygon2D extends ActiveContour
         
         switch (type)
         {
-            case AREA:
-                roi = new ROI2DArea();
-                ((ROI2DArea) roi).addShape(path);
+            case AREA: {
+                //                roi = new ROI2DArea();
+                //                ((ROI2DArea) roi).addShape(path);
+                List<Point2D> p2d = new ArrayList<Point2D>(points.size());
+                for (Point3d p : this)
+                    p2d.add(new Point2D.Double(p.x, p.y));
+                roi = (ROI2D) ROIUtil.convertToMask(new ROI2DPolygon(p2d));
+            }
             break;
-            
-            case POLYGON:
+        
+            case POLYGON: {
                 List<Point2D> p2d = new ArrayList<Point2D>(points.size());
                 for (Point3d p : this)
                     p2d.add(new Point2D.Double(p.x, p.y));
                 roi = new ROI2DPolygon(p2d);
-            break;
-            
+                break;
+            }
             default:
                 throw new IllegalArgumentException("ROI of type " + type + " cannot be exported yet");
         }
