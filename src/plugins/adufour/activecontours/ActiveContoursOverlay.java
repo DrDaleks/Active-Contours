@@ -1,5 +1,10 @@
 package plugins.adufour.activecontours;
 
+import java.awt.Graphics2D;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.ConcurrentModificationException;
+
 import icy.canvas.IcyCanvas;
 import icy.painter.Overlay;
 import icy.sequence.Sequence;
@@ -7,12 +12,6 @@ import icy.sequence.SequenceEvent;
 import icy.sequence.SequenceEvent.SequenceEventSourceType;
 import icy.sequence.SequenceEvent.SequenceEventType;
 import icy.sequence.SequenceListener;
-
-import java.awt.Graphics2D;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.ConcurrentModificationException;
-
 import plugins.fab.trackmanager.TrackGroup;
 import plugins.fab.trackmanager.TrackSegment;
 import plugins.nchenouard.spot.Detection;
@@ -32,7 +31,7 @@ public class ActiveContoursOverlay extends Overlay implements SequenceListener
     {
         if (!Arrays.asList(sequence.getListeners()).contains(this)) sequence.addListener(this);
         
-        int t = canvas.getPositionT();
+        int currentPositionT = canvas.getPositionT();
         
         ArrayList<TrackSegment> segments = new ArrayList<TrackSegment>(trackGroup.getTrackSegmentList());
         
@@ -46,11 +45,12 @@ public class ActiveContoursOverlay extends Overlay implements SequenceListener
             {
                 ActiveContour contour = (ActiveContour) segment.getDetectionList().get(d);
                 
-                if (contour == null) continue;
-                
+                if (contour == null || contour.getT() != currentPositionT) continue;
+                                
                 contour.paint(g, sequence, canvas);
                 
-                if (g != null && contour.getT() == t)
+                // 2D viewer ?
+                if (g != null)
                 {
                     // in 2D, draw the contour number in its center (and mind the zoom factor)
                     float f = (float) canvas.canvasToImageLogDeltaX(18);

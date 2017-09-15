@@ -1,14 +1,5 @@
 package plugins.adufour.activecontours;
 
-import icy.canvas.IcyCanvas;
-import icy.painter.Overlay;
-import icy.roi.BooleanMask3D;
-import icy.roi.ROI;
-import icy.roi.ROI3D;
-import icy.sequence.Sequence;
-import icy.type.DataType;
-import icy.type.rectangle.Rectangle3D;
-
 import java.awt.Graphics2D;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -19,6 +10,16 @@ import javax.vecmath.Vector3d;
 
 import org.w3c.dom.Node;
 
+import com.jogamp.graph.geom.Triangle;
+
+import icy.canvas.IcyCanvas;
+import icy.painter.Overlay;
+import icy.roi.BooleanMask3D;
+import icy.roi.ROI;
+import icy.roi.ROI3D;
+import icy.sequence.Sequence;
+import icy.type.DataType;
+import icy.type.rectangle.Rectangle3D;
 import plugins.adufour.activecontours.ActiveContours.ROIType;
 import plugins.adufour.activecontours.SlidingWindow.Operation;
 import plugins.adufour.roi.mesh.MeshTopologyException;
@@ -37,11 +38,11 @@ public class Mesh3D extends ActiveContour
      */
     private static class ActiveVertex extends Vertex3D
     {
-        public final Vector3d imageForces      = new Vector3d();
+        public final Vector3d imageForces = new Vector3d();
         
-        public final Vector3d internalForces   = new Vector3d();
+        public final Vector3d internalForces = new Vector3d();
         
-        public final Vector3d feedbackForces   = new Vector3d();
+        public final Vector3d feedbackForces = new Vector3d();
         
         public final Vector3d volumeConstraint = new Vector3d();
         
@@ -397,12 +398,12 @@ public class Mesh3D extends ActiveContour
     {
         switch (order)
         {
-        case 0:
-            return mesh.getNumberOfVertices(true);
-        case 1:
-            return mesh.getNumberOfContourPoints();
-        case 2:
-            return mesh.getNumberOfPoints();
+            case 0:
+                return mesh.getNumberOfVertices(true);
+            case 1:
+                return mesh.getNumberOfContourPoints();
+            case 2:
+                return mesh.getNumberOfPoints();
         }
         return Double.NaN;
     }
@@ -519,13 +520,13 @@ public class Mesh3D extends ActiveContour
         
         return new Iterator<Point3d>()
         {
-            Iterator<Vertex3D> vertexIterator       = mesh.getVertices().iterator();
+            Iterator<Vertex3D> vertexIterator = mesh.getVertices().iterator();
             
-            Vertex3D           next;
+            Vertex3D next;
             
-            boolean            hasNext;
+            boolean hasNext;
             
-            boolean            hasNextWasCalledOnce = false;
+            boolean hasNextWasCalledOnce = false;
             
             @Override
             public void remove()
@@ -754,7 +755,6 @@ public class Mesh3D extends ActiveContour
         
         return outCpt == 0 ? 0 : outSum / outCpt;
     }
-
     
     @Override
     public double getDistanceToEdge(Point3d p)
@@ -776,16 +776,16 @@ public class Mesh3D extends ActiveContour
         
         switch (type)
         {
-        case POLYGON: {
-            roi = mesh.clone();
-            break;
-        }
-        case AREA: {
-            roi = new ROI3DArea(mesh.getBooleanMask(true));
-            break;
-        }
-        default:
-            throw new UnsupportedOperationException("Cannot export a ROI of type: " + type);
+            case POLYGON: {
+                roi = mesh.clone();
+                break;
+            }
+            case AREA: {
+                roi = new ROI3DArea(mesh.getBooleanMask(true));
+                break;
+            }
+            default:
+                throw new UnsupportedOperationException("Cannot export a ROI of type: " + type);
         }
         
         roi.setT(mesh.getT());
@@ -805,9 +805,13 @@ public class Mesh3D extends ActiveContour
         mesh.updateNormals();
     }
     
+    boolean isRemoving = false;
+    
     @Override
     protected void clean()
     {
+        isRemoving = true;
+        
         for (Overlay overlay : overlays.values())
             overlay.remove();
         overlays.clear();
@@ -816,14 +820,18 @@ public class Mesh3D extends ActiveContour
     HashMap<IcyCanvas, Overlay> overlays = new HashMap<IcyCanvas, Overlay>();
     
     @Override
-    public void paint(Graphics2D g, Sequence sequence, IcyCanvas canvas)
+    public void paint(Graphics2D g, final Sequence sequence, IcyCanvas canvas)
     {
+        if (isRemoving) return;
+        
         if (overlays.containsKey(canvas)) return;
         
-        Overlay overlay = mesh.getOverlay();
+        final Overlay overlay = mesh.getOverlay();
         overlay.setCanBeRemoved(true);
         overlay.setName("Active Mesh overlay");
         overlays.put(canvas, overlay);
         sequence.addOverlay(overlay);
+        
+        overlay.paint(g, sequence, canvas);
     }
 }
