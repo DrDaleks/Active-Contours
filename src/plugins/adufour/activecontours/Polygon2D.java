@@ -158,7 +158,15 @@ public class Polygon2D extends ActiveContour
         //counterClockWise = contour.counterClockWise;
     }
     
-    public Polygon2D(Var<Double> sampling, SlidingWindow convergenceWindow, ROI2D roi)
+    /**
+     * @param sampling
+     * @param convergenceWindow
+     * @param roi
+     * @throws TopologyException
+     *             if the contour cannot created for topological reason (e.g. the roi is too small
+     *             w.r.t. the sampling size)
+     */
+    public Polygon2D(Var<Double> sampling, SlidingWindow convergenceWindow, ROI2D roi) throws TopologyException
     {
         this(sampling, convergenceWindow);
         
@@ -169,6 +177,9 @@ public class Polygon2D extends ActiveContour
         
         setZ(roi.getZ());
         setName("Contour (" + roi.getName() + ")");
+        
+        // Don't bother initializing contours that are too small w.r.t. the required sampling
+        if (roi.getNumberOfPoints() < sampling.getValue() * 3) throw new TopologyException(this, null);
         
         if (roi instanceof ROI2DArea)
         {
@@ -240,18 +251,7 @@ public class Polygon2D extends ActiveContour
             Collections.reverse(points);
         }
         
-        try
-        {
-            reSample(0.8, 1.4);
-        }
-        catch (TopologyException e)
-        {
-            Rectangle2D bounds = roi.getBounds2D();
-            
-            double xC = bounds.getCenterX();
-            double yC = bounds.getCenterY();
-            throw new RuntimeException("Couldn't create a contour from ROI: " + roi.getName() + " (located at " + xC + " ; " + yC + ")");
-        }
+        reSample(0.8, 1.4);
     }
     
     protected void addPoint(Point3d p)

@@ -180,7 +180,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     
     private boolean globalStop;
     
-    private Var<TrackGroup> trackGroup = new Var<TrackGroup>("Tracks", TrackGroup.class);
+    public Var<TrackGroup> trackGroup = new Var<TrackGroup>("Tracks", TrackGroup.class);
     
     /**
      * All contours present on the current time point
@@ -436,40 +436,47 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 }
                 
                 for (ROI2D newROI : newObjects)
-                {
-                    ROI2DArea roi = new ROI2DArea(newROI.getBooleanMask(true));
-                    roi.setZ(0);
-                    ActiveContour contour = new Polygon2D(contour_resolution.getVariable(), new SlidingWindow(convergence_winSize.getValue()), roi);
-                    contour.setDivisionSensitivity(division_sensitivity.getVariable());
-                    contour.setT(t);
-                    
-                    TrackSegment segment = null;
-                    // does it overlap with a track that terminates in the previous frame?
-                    synchronized (trackGroup)
+                    try
                     {
-                        for (TrackSegment track : trackGroup.getValue().getTrackSegmentList())
+                        ROI2DArea roi = new ROI2DArea(newROI.getBooleanMask(true));
+                        roi.setZ(0);
+                        ActiveContour contour = new Polygon2D(contour_resolution.getVariable(), new SlidingWindow(convergence_winSize.getValue()), roi);
+                        contour.setDivisionSensitivity(division_sensitivity.getVariable());
+                        contour.setT(t);
+                        
+                        TrackSegment segment = null;
+                        // does it overlap with a track that terminates in the previous frame?
+                        synchronized (trackGroup)
                         {
-                            ActiveContour trackEnd = (ActiveContour) track.getLastDetection();
-                            if (trackEnd == null) System.err.println("null");
-                            else if (trackEnd.getT() == (t - 1) && trackEnd.boundingBox.intersect(contour.boundingBox))
+                            for (TrackSegment track : trackGroup.getValue().getTrackSegmentList())
                             {
-                                System.out.println("found link at time " + t + ", position (" + contour.getX() + ";" + contour.getY() + ")");
-                                segment = track;
-                                break;
+                                ActiveContour trackEnd = (ActiveContour) track.getLastDetection();
+                                if (trackEnd == null) System.err.println("null");
+                                else if (trackEnd.getT() == (t - 1) && trackEnd.boundingBox.intersect(contour.boundingBox))
+                                {
+                                    System.out.println("found link at time " + t + ", position (" + contour.getX() + ";" + contour.getY() + ")");
+                                    segment = track;
+                                    break;
+                                }
                             }
+                            
+                            if (segment == null)
+                            { // no candidate contour found
+                                segment = new TrackSegment();
+                                trackGroup.getValue().addTrackSegment(segment);
+                                region_cin.put(segment, 0.0);
+                                region_cout.put(segment, 0.0);
+                            }
+                            
+                            segment.addDetection(contour);
                         }
-                        
-                        if (segment == null)
-                        { // no candidate contour found
-                            segment = new TrackSegment();
-                            trackGroup.getValue().addTrackSegment(segment);
-                            region_cin.put(segment, 0.0);
-                            region_cout.put(segment, 0.0);
-                        }
-                        
-                        segment.addDetection(contour);
                     }
-                }
+                    catch (TopologyException topo)
+                    {
+                        double xC = newROI.getBounds().getCenterX();
+                        double yC = newROI.getBounds().getCenterY();
+                        System.err.println("Warning: couldn't create a contour at location " + xC + " ; " + yC + ")");
+                    }
                 
                 evolveContours(t);
             }
@@ -719,32 +726,43 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                             BooleanMask2D[] components = area.getBooleanMask(true).getComponents();
                             
                             for (BooleanMask2D comp : components)
-                            {
-                                ROI2DArea r2 = new ROI2DArea(comp);
-                                r2.setZ(roi2d.getZ());
-                                
-                                final SlidingWindow window = new SlidingWindow(convergence_winSize.getValue());
-                                final ActiveContour contour = new Polygon2D(contour_resolution.getVariable(), window, r2);
-                                contour.setDivisionSensitivity(division_sensitivity.getVariable());
-                                contour.setT(t);
-                                
-                                TrackSegment segment = new TrackSegment();
-                                segment.addDetection(contour);
-                                synchronized (trackGroup)
+                                try
                                 {
-                                    trackGroup.getValue().addTrackSegment(segment);
+                                    ROI2DArea r2 = new ROI2DArea(comp);
+                                    
+                                    // Don't bother initializing contours that are too small w.r.t. the required sampling
+                                    if (r2.getNumberOfPoints() < contour_resolution.getValue() * 3) continue;
+                                    
+                                    r2.setZ(roi2d.getZ());
+                                    
+                                    final SlidingWindow window = new SlidingWindow(convergence_winSize.getValue());
+                                    final ActiveContour contour = new Polygon2D(contour_resolution.getVariable(), window, r2);
+                                    contour.setDivisionSensitivity(division_sensitivity.getVariable());
+                                    contour.setT(t);
+                                    
+                                    TrackSegment segment = new TrackSegment();
+                                    segment.addDetection(contour);
+                                    synchronized (trackGroup)
+                                    {
+                                        trackGroup.getValue().addTrackSegment(segment);
+                                    }
+                                    synchronized (region_cin)
+                                    {
+                                        region_cin.put(segment, 0.0);
+                                    }
+                                    synchronized (region_cout)
+                                    {
+                                        region_cout.put(segment, 0.0);
+                                    }
                                 }
-                                synchronized (region_cin)
+                                catch (TopologyException topo)
                                 {
-                                    region_cin.put(segment, 0.0);
+                                    double xC = comp.bounds.getCenterX();
+                                    double yC = comp.bounds.getCenterY();
+                                    System.err.println("Warning: couldn't create a contour at location " + xC + " ; " + yC + ")");
                                 }
-                                synchronized (region_cout)
-                                {
-                                    region_cout.put(segment, 0.0);
-                                }
-                            }
                         }
-                        else
+                        else try
                         {
                             final SlidingWindow window = new SlidingWindow(convergence_winSize.getValue());
                             final ActiveContour contour = new Polygon2D(contour_resolution.getVariable(), window, roi2d);
@@ -764,6 +782,12 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                             {
                                 region_cout.put(segment, 0.0);
                             }
+                        }
+                        catch (TopologyException topo)
+                        {
+                            double xC = roi2d.getBounds().getCenterX();
+                            double yC = roi2d.getBounds().getCenterY();
+                            System.err.println("Warning: couldn't create a contour at location " + xC + " ; " + yC + ")");
                         }
                     }
                     else if (roi instanceof ROI3D)
@@ -828,7 +852,8 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             }
             catch (Exception e)
             {
-                System.err.println("Error while initialising a contour (moving on...)");
+                e.printStackTrace();
+                System.err.println("Warning: couldn't initialise a contour (reason: " + e.getMessage() + "). Moving on...");
             }
         }
     }
