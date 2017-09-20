@@ -1503,15 +1503,17 @@ public class Polygon2D extends ActiveContour
         
         int nbPoints = points.size();
         
-        Point3d p = points.get(0);
-        newPath.moveTo(p.x, p.y);
-        
-        for (int i = 1; i < nbPoints; i++)
+        if (nbPoints > 0)
         {
-            p = points.get(i);
-            newPath.lineTo(p.x, p.y);
+            Point3d p = points.get(0);
+            newPath.moveTo(p.x, p.y);
+            
+            for (int i = 1; i < nbPoints; i++)
+            {
+                p = points.get(i);
+                newPath.lineTo(p.x, p.y);
+            }
         }
-        
         newPath.closePath();
         
         this.path = newPath;
