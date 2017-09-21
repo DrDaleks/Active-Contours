@@ -180,7 +180,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     
     private boolean globalStop;
     
-    public Var<TrackGroup> trackGroup = new Var<TrackGroup>("Tracks", TrackGroup.class);
+    private Var<TrackGroup> trackGroup = new Var<TrackGroup>("Tracks", TrackGroup.class);
     
     /**
      * All contours present on the current time point
@@ -307,8 +307,12 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
         int startT = inputData.getFirstViewer() == null ? 0 : inputData.getFirstViewer().getPositionT();
         int endT = tracking.getValue() ? inputData.getSizeT() - 1 : startT;
         
-        trackGroup.setValue(new TrackGroup(inputData));
-        trackGroup.getValue().setDescription("Active contours (" + new Date().toString() + ")");
+        // Reset (if any) and (re)create a new track group for the current run
+        TrackGroup tracks = trackGroup.getValue(false);
+        if (tracks != null) tracks.clearAllTrackSegment();
+        tracks = new TrackGroup(inputData);
+        tracks.setDescription("Active contours (" + new Date().toString() + ")");
+        trackGroup.setValue(tracks);
         
         if (overlay != null) overlay.remove();
         
@@ -318,7 +322,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             for (Overlay existingOverlay : inputData.getOverlays())
                 if (existingOverlay instanceof ActiveContoursOverlay) existingOverlay.remove();
             
-            overlay = new ActiveContoursOverlay(trackGroup.getValue());
+            overlay = new ActiveContoursOverlay(tracks);
             overlay.setPriority(OverlayPriority.TOPMOST);
             inputData.addOverlay(overlay);
         }
@@ -418,7 +422,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
                 }
                 
                 // 1) discard objects overlapping with existing contours
-                for (TrackSegment segment : trackGroup.getValue().getTrackSegmentList())
+                for (TrackSegment segment : tracks.getTrackSegmentList())
                 {
                     Detection previous = segment.getDetectionAtTime(t);
                     
@@ -509,23 +513,10 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
             }
         }
         
-        // if (!globalStop)
-        if (isHeadLess() || output_rois.getValue() != ExportROI.NO)
-        {
-            // remove the painter after processing
-            if (overlay != null)
-            {
-                overlay.remove();
-            }
-            
-            if (isHeadLess() && !trackGroup.isReferenced())
-            {
-                // the track group is of no longer use
-                trackGroup.getValue().clearAllTrackSegment();
-            }
-        }
+        // remove the painter after processing if an export was required
+        if (output_rois.getValue() != ExportROI.NO && overlay != null) overlay.remove();
         
-        // clean other non-necessary stuff
+        // clean other non-necessary stuff right away
         region_cin.clear();
         region_cout.clear();
         allContoursAtTimeT.clear();
@@ -1485,7 +1476,7 @@ public class ActiveContours extends EzPlug implements EzStoppable, Block
     public void clean()
     {
         if (inputData != null) inputData.removeOverlay(overlay);
-        
+        if (trackGroup.getValue() != null) trackGroup.getValue().clearAllTrackSegment();
         multiThreadService.shutdownNow();
     }
     
